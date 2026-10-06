@@ -1,0 +1,89 @@
+{
+  "name": "vay-reports",
+  "productName": "Vay Reports",
+  "version": "8.0.0",
+  "private": true,
+  "description": "Vay Reports desktop shell",
+  "main": "main.js",
+  "author": "Vay",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron .",
+    "start:client": "node scripts/start-client.js",
+    "dev:client": "node scripts/start-client.js",
+    "download-mongo": "node scripts/download-mongo.js",
+    "icon": "python scripts/make_icon.py",
+    "dist": "node scripts/build-win.js",
+    "dist:mac": "node scripts/build-mac.js",
+    "dist:client": "node scripts/build-client.js",
+    "dist:client:mac": "node scripts/build-client-mac.js"
+  },
+  "devDependencies": {
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.vay.reports",
+    "productName": "Vay Reports",
+    "copyright": "Vay",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "preload-tabs.js",
+      "preload-config.js",
+      "splash.html",
+      "tabs.html"
+    ],
+    "extraResources": [
+      {
+        "from": "vendor/mongo",
+        "to": "mongo"
+      },
+      {
+        "from": "../dist/vay-api",
+        "to": "vay-api"
+      },
+      {
+        "from": "build/icon.png",
+        "to": "icon.png"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "build/icon.png",
+      "artifactName": "Vay-Reports-Setup-${version}.${ext}",
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": true,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Vay Reports",
+      "include": "installer.nsh"
+    },
+    "mac": {
+      "target": ["dmg", "pkg"],
+      "icon": "build/icon.png",
+      "category": "public.app-category.business",
+      "artifactName": "Vay-Reports-${version}-${arch}.${ext}",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist"
+    },
+    "dmg": {
+      "title": "Vay Reports ${version}"
+    }
+  }
+}

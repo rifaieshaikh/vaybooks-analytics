@@ -1,0 +1,61 @@
+{
+  "appId": "com.vay.reports.client",
+  "productName": "Vay Reports Client",
+  "copyright": "Vay",
+  "directories": {
+    "output": "release",
+    "buildResources": "build"
+  },
+  "files": [
+    "main.js",
+    "preload.js",
+    "preload-config.js",
+    "splash.html"
+  ],
+  "extraResources": [
+    {
+      "from": "client-resources/client.marker",
+      "to": "client.marker"
+    },
+    {
+      "from": "client-resources/config.json",
+      "to": "config.json"
+    },
+    {
+      "from": "build/icon.png",
+      "to": "icon.png"
+    }
+  ],
+  "win": {
+    "target": [
+      {
+        "target": "nsis",
+        "arch": ["x64"]
+      }
+    ],
+    "icon": "build/icon.png",
+    "artifactName": "Vay-Reports-Client-Setup-${version}.${ext}",
+    "signAndEditExecutable": false
+  },
+  "nsis": {
+    "oneClick": false,
+    "perMachine": false,
+    "allowToChangeInstallationDirectory": true,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "shortcutName": "Vay Reports Client"
+  },
+  "mac": {
+    "target": ["dmg", "pkg"],
+    "icon": "build/icon.png",
+    "category": "public.app-category.business",
+    "artifactName": "Vay-Reports-Client-${version}-${arch}.${ext}",
+    "hardenedRuntime": true,
+    "gatekeeperAssess": false,
+    "entitlements": "build/entitlements.mac.plist",
+    "entitlementsInherit": "build/entitlements.mac.plist"
+  },
+  "dmg": {
+    "title": "Vay Reports Client ${version}"
+  }
+}

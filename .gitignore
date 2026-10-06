@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+.pytest_cache/
+web/node_modules/
+web/dist/
+vay_reports/
+/dist/
+/build/
+desktop/node_modules/
+desktop/vendor/
+desktop/release/
+

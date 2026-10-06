@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Tabs</title>
+    <style>
+      html, body {
+        height: 100%;
+        margin: 0;
+        background: #0f3d2e;
+        color: #fff;
+        font-family: "Segoe UI", system-ui, sans-serif;
+        overflow: hidden;
+        user-select: none;
+      }
+      .bar {
+        display: flex;
+        align-items: flex-end;
+        height: 100%;
+        gap: 6px;
+        padding: 6px 10px 0;
+        box-sizing: border-box;
+        border-bottom: 1px solid #0a2a20;
+        background: #0f3d2e;
+      }
+      .tabs {
+        display: flex;
+        flex: 1;
+        gap: 4px;
+        min-width: 0;
+        overflow-x: auto;
+        scrollbar-width: none;
+      }
+      .tabs::-webkit-scrollbar { height: 0; }
+      .tab {
+        display: flex;
+        align-items: center;
+        gap: 2px;
+        max-width: 220px;
+        min-width: 120px;
+        height: 32px;
+        padding: 0 6px 0 12px;
+        border-radius: 10px 10px 0 0;
+        background: #1a5642;
+        color: #d6e4de;
+      }
+      .tab:hover {
+        background: #216b52;
+        color: #fff;
+      }
+      .tab.active {
+        background: #f7f8f6;
+        color: #1c1917;
+      }
+      .label, .close, .add {
+        border: 0;
+        background: transparent;
+        color: inherit;
+        font: inherit;
+        cursor: pointer;
+      }
+      .label {
+        flex: 1;
+        min-width: 0;
+        padding: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        text-align: left;
+        font-size: 13px;
+      }
+      .close {
+        width: 20px;
+        height: 20px;
+        border-radius: 6px;
+        line-height: 18px;
+        padding: 0;
+        font-size: 15px;
+        opacity: 0;
+      }
+      .tab:hover .close,
+      .tab.active .close,
+      .tab:focus-within .close { opacity: 1; }
+      .tab:not(.active) .close:hover { background: rgba(255, 255, 255, 0.16); }
+      .tab.active .close:hover { background: rgba(0, 0, 0, 0.1); }
+      .add {
+        flex-shrink: 0;
+        width: 28px;
+        height: 28px;
+        margin: 0 0 4px;
+        border-radius: 50%;
+        color: #fff;
+        font-size: 18px;
+        line-height: 1;
+      }
+      .add:hover { background: #216b52; }
+    </style>
+  </head>
+  <body>
+    <div class="bar">
+      <div class="tabs" id="tabs" role="tablist"></div>
+      <button class="add" id="add" type="button" title="New tab (Ctrl+T)">+</button>
+    </div>
+    <script>
+      const root = document.getElementById("tabs");
+
+      function render(payload) {
+        if (!payload) return;
+        root.replaceChildren();
+        const many = payload.tabs.length > 1;
+        for (const tab of payload.tabs) {
+          const row = document.createElement("div");
+          row.className = "tab" + (tab.id === payload.activeId ? " active" : "");
+          row.setAttribute("role", "tab");
+          row.setAttribute("aria-selected", tab.id === payload.activeId ? "true" : "false");
+
+          const label = document.createElement("button");
+          label.type = "button";
+          label.className = "label";
+          label.textContent = tab.title || "Vay Reports";
+          label.title = tab.title || "Vay Reports";
+          label.addEventListener("click", () => window.vayTabs.activate(tab.id));
+          row.appendChild(label);
+
+          if (many) {
+            const close = document.createElement("button");
+            close.type = "button";
+            close.className = "close";
+            close.textContent = "×";
+            close.title = "Close tab";
+            close.addEventListener("click", () => window.vayTabs.close(tab.id));
+            row.appendChild(close);
+          }
+          root.appendChild(row);
+        }
+      }
+
+      document.getElementById("add").addEventListener("click", () => window.vayTabs.newTab());
+      window.vayTabs.onChange(render);
+      window.vayTabs.list().then(render);
+    </script>
+  </body>
+</html>

@@ -1,0 +1,8 @@
+{
+  "report_date": "2026-09-19",
+  "sales": ["19-09-26", "Acme", "RepA", 100],
+  "credit_note": ["1", "INV1", "19-09-26", "Acme", 20, 0, 0, 0, 20],
+  "receipt": ["19-09-26", "Acme", "RepA", 40],
+  "expect_sales_mtd": 80,
+  "expect_collection": 40
+}
