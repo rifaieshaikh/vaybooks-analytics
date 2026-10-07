@@ -5,11 +5,15 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from server.actions import (
     _owners,
     attach_outcomes,
+    build_results,
     create_action,
     default_due,
     list_action_rows,
+    record_review_open,
     set_status,
     suggestions,
+    _scoped_actions,
+    _rep_map,
 )
 from server.auth import assert_perm, require_user
 from server.collection import (
@@ -38,6 +42,7 @@ from server.schemas import (
 )
 from server.store import get_store
 from server.weekly import ensure_weekly_run_once
+from server.worklist import build_worklist, resolve_scope
 
 router = APIRouter()
 
@@ -99,6 +104,25 @@ def _with_outcomes(store, report_date, bundle=None):
                 bundle = None
         messages = [row.get("message") or "" for row in ((bundle or {}).get("quality") or {}).get("rows") or []]
     return attach_outcomes(store, rows, messages, report_date=report_date)
+
+
+@router.get("/api/worklist")
+def api_worklist(request: Request, user=Depends(require_user)):
+    if not _can_read(user):
+        raise HTTPException(403, "Forbidden")
+    store = get_store()
+    staff = request.query_params.get("staff") or ""
+    try:
+        scope = resolve_scope(store, user, staff)
+    except PermissionError as exc:
+        raise HTTPException(403, "Forbidden") from exc
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    runs = [row for row in (store.list_runs() or []) if row.get("status") == "succeeded"]
+    report_date = str((runs[0].get("report_date") if runs else "") or "")[:10]
+    from server.explain import annotate_today
+    payload = build_worklist(store, scope, report_date)
+    return annotate_today(store, payload, user.get("permissions") or [])
 
 
 @router.get("/api/actions")
@@ -226,20 +250,38 @@ def api_review(request: Request, user=Depends(require_user)):
     store = get_store()
     ensure_weekly_run_once(store)
     run = _run(store, request.query_params.get("run") or "")
+    try:
+        scope = resolve_scope(store, user, request.query_params.get("staff") or "")
+    except PermissionError as exc:
+        raise HTTPException(403, "Forbidden") from exc
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
     bundle = _bundle(store, run)
     policy = get_org_policy(store)
     ideas = suggestions(bundle, policy.get("thresholds") or {})
     report_date = str(run.get("report_date") or "")[:10]
     actions = _with_outcomes(store, report_date, bundle)
     week = [row for row in actions if str(row.get("report_date") or "")[:10] == report_date or not row.get("report_date")]
+    week = _scoped_actions(week, scope, _rep_map(store))
+    opens = record_review_open(store, user.get("username") or "", report_date)
     return {
         "report_date": report_date,
         "suggestions": ideas,
         "actions": week,
+        "results": build_results(store, week, scope, report_date, run, opens),
         "owners": _owners(store),
         "default_due": default_due(report_date),
         "can_manage": "actions.manage" in (user.get("permissions") or []),
     }
+
+
+@router.get("/api/cash")
+def api_cash(user=Depends(require_user)):
+    perms = set(user.get("permissions") or [])
+    if not perms.intersection({"payments.view", "reports.view.scorecard", "actions.manage", "opening_cash.view"}):
+        raise HTTPException(403, "Forbidden")
+    from server.cash import build_cash
+    return build_cash(get_store())
 
 
 @router.get("/api/reorder")
@@ -264,7 +306,8 @@ def api_reorder(request: Request, user=Depends(require_user)):
     built["status"] = "eligible"
     built["owners"] = _owners(store)
     built["can_manage"] = "actions.manage" in (user.get("permissions") or [])
-    return built
+    from server.explain import annotate_reorder
+    return annotate_reorder(built, store, user.get("permissions") or [])
 
 
 @router.put("/api/reorder")

@@ -216,10 +216,15 @@ def _stock_rows(tables):
                 cost = float(str(raw).replace(",", "").strip())
             except (TypeError, ValueError):
                 cost = None
+        cost_date = ""
+        if "Cost Date" in stock.index:
+            raw_day = stock.get(row, "Cost Date")
+            cost_date = raw_day.strftime("%Y-%m-%d") if hasattr(raw_day, "strftime") else str(raw_day or "")[:10]
         rows.append({
             "name": str(stock.get(row, "Item Name") or "").strip(),
             "qty": number_(stock.get(row, "Qty")),
             "cost": cost,
+            "cost_date": cost_date,
         })
     return rows
 
@@ -227,9 +232,36 @@ def _stock_rows(tables):
 def _costs(stock_rows):
     out = {}
     for row in stock_rows:
-        if row.get("name") and row.get("cost") is not None:
-            out[row["name"]] = row["cost"]
+        name = row.get("name")
+        cost = row.get("cost")
+        if not name or cost is None:
+            continue
+        slot = out.setdefault(name, {"snapshot": None, "history": []})
+        day = str(row.get("cost_date") or "")[:10]
+        if day:
+            slot["history"].append({"date": day, "cost": cost})
+        else:
+            slot["snapshot"] = cost
     return out
+
+
+def _merge_item_costs(store, costs):
+    from vay.dates import clean_text, number_, parse_date
+    for doc in store.rows_of_type("item_cost") or []:
+        fields = doc.get("fields") or {}
+        name = clean_text(fields.get("Item Name"))
+        cost = number_(fields.get("Cost"))
+        raw_day = fields.get("Effective Date") or doc.get("effective_date")
+        parsed = parse_date(raw_day)
+        day = parsed.strftime("%Y-%m-%d") if parsed else ""
+        if not name or cost is None or not day:
+            continue
+        slot = costs.setdefault(name, {"snapshot": None, "history": []})
+        if isinstance(slot, (int, float)):
+            slot = {"snapshot": float(slot), "history": []}
+            costs[name] = slot
+        slot["history"].append({"date": day, "cost": cost})
+    return costs
 
 
 def _ar_totals(accounts):
@@ -273,7 +305,12 @@ def build_bundle(store, report_date, exceptions=None, review_count=0, prepared=N
     stock = stock_decisions(item_rows, stock_rows, report_date)
     margin = None
     if (eligibility.get("gross_margin") or {}).get("status") == "eligible":
-        margin = gross_margin_periods(item_rows, _costs(stock_rows), report_date, policy.get("sales_tax_inclusive_rate"))
+        margin = gross_margin_periods(
+            item_rows,
+            _merge_item_costs(store, _costs(stock_rows)),
+            report_date,
+            policy.get("sales_tax_inclusive_rate"),
+        )
     targets = (get_org_policy(store) or {}).get("targets") or {}
     bundle = {
         "report_date": str(report_date)[:10],

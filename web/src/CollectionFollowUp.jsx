@@ -481,7 +481,10 @@ export default function CollectionFollowUp({ customerName, customerUk, invoices,
                       {item.kind === "promise" ? (
                         <>
                           <div>{money(item.row.amount)} promised {item.row.promised_on} · By {item.row.staff || item.row.created_by || "—"}{item.row.invoice_refs?.length ? " · " + item.row.invoice_refs.join(", ") : ""}</div>
-                          <div className="muted">{money(item.row.remaining)} remaining</div>
+                          <div className="muted">
+                            {money(item.row.remaining)} remaining
+                            {item.row.receipt_coverage_through ? " · Receipts through " + item.row.receipt_coverage_through : ""}
+                          </div>
                           {item.row.message ? <div className="muted">{item.row.message}</div> : null}
                           {(item.row.allocations || []).filter((alloc) => !alloc.voided_at || alloc.void_reason).map((alloc) => (
                             <div className="muted" key={alloc.id}>

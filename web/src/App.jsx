@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import BusinessPage from "./Business";
+import CashPage from "./Cash";
 import ChangePasswordPage from "./ChangePassword";
 import CreatePage from "./Create";
 import CustomersPage from "./Customers";
@@ -275,7 +276,7 @@ export default function App() {
             <div className={"nav-sub" + (openTab === group.id ? " open" : "")}>
               {group.items.map((entry) => {
                 const disabled = (entry.kind === "reports" && !familyPresent(entry.family))
-                  || (entry.kind === "analytics" && !succeeded);
+                  || (entry.kind === "analytics" && entry.id !== "today" && !succeeded);
                 return (
                   <button
                     type="button"
@@ -362,6 +363,7 @@ export default function App() {
           {item?.kind === "groups" ? <GroupsPage user={user} runId={viewRunId} /> : null}
           {item?.kind === "reps" ? <RepsPage user={user} runId={viewRunId} /> : null}
           {item?.kind === "stock" ? <StockPage user={user} profile={false} runId={viewRunId} /> : null}
+          {item?.kind === "cash" ? <CashPage /> : null}
           {item?.kind === "create" ? (
             <CreatePage
               user={user}

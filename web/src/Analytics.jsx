@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { api } from "./api";
 import CollectionFollowUp from "./CollectionFollowUp";
+import ExplainFigure from "./ExplainFigure";
 import { hashSet, money } from "./format";
 import SalesCompare, { formatQty, resultLabel } from "./SalesCompare";
 import { can } from "./theme";
@@ -33,6 +34,7 @@ const PAGE = {
   stock: ["Stock decisions", "Cover, slow stock, and what to reorder."],
   quality: ["Data quality", "Exceptions to correct in the source files."],
   review: ["Weekly review", "Suggested work for this report, and what is already assigned."],
+  today: ["Today", "Who to contact, and why, from the latest follow-ups, promises, and sales."],
   reorder: ["Reorder", "Quantities round up to pack size and stop at the budget. Snapshot cost is today's purchase price."],
   builder: ["Report builder", "Arrange the existing metrics. Saving a report does not change sales, outstanding, or stock."],
 };
@@ -71,7 +73,7 @@ export default function AnalyticsPage({ section, run, user }) {
     let cancelled = false;
     setErr("");
     setSaved("");
-    if (section === "review" || section === "reorder" || section === "builder") {
+    if (section === "today" || section === "review" || section === "reorder" || section === "builder") {
       setData({});
       return undefined;
     }
@@ -186,6 +188,7 @@ export default function AnalyticsPage({ section, run, user }) {
           report_date: run?.report_date || data.report_date || "",
         }) : null} />
       ) : null}
+      {section === "today" ? <TodayPage user={user} /> : null}
       {section === "review" ? <WeeklyReview run={run} user={user} /> : null}
       {section === "reorder" ? <ReorderPage run={run} user={user} /> : null}
       {section === "builder" ? <ReportBuilder run={run} user={user} /> : null}
@@ -611,6 +614,118 @@ function AssignDialog({ draft, user, onClose, onSaved }) {
   );
 }
 
+const WORK_KIND = {
+  follow_up: "Follow up",
+  missed_promise: "Missed promise",
+  pending_refresh: "Promise",
+  repurchase: "Repurchase",
+  inactive: "Inactive",
+};
+
+function TodayPage({ user }) {
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState("");
+  const [staff, setStaff] = useState("");
+  const [open, setOpen] = useState(null);
+  const manage = can(user, "actions.manage");
+
+  function load(nextStaff) {
+    const who = nextStaff === undefined ? staff : nextStaff;
+    api.worklist(who)
+      .then((payload) => { setData(payload); setErr(""); })
+      .catch((e) => setErr(e.message || "Could not load today's work"));
+  }
+
+  useEffect(() => { load(""); }, []);
+
+  async function mark(row, status) {
+    setErr("");
+    try {
+      await api.setActionStatus(row.action_id, status);
+      load();
+    } catch (e) {
+      setErr(e.message || "Could not update the action");
+    }
+  }
+
+  if (err && !data) return <p className="err">{err}</p>;
+  if (!data) return <p className="muted">Loading…</p>;
+  const rows = data.rows || [];
+  return (
+    <div>
+      <p className="muted">{data.order_rule}</p>
+      {data.can_pick_staff ? (
+        <label>
+          Staff
+          <select value={staff} onChange={(e) => { setStaff(e.target.value); load(e.target.value); }}>
+            <option value="">All accounts</option>
+            {(data.staff_options || []).map((person) => (
+              <option key={person.username} value={person.username}>
+                {person.username} ({(person.sales_reps || []).join(", ")})
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
+      {data.message && rows.length ? <p className="warn">{data.message}</p> : null}
+      {err ? <p className="err">{err}</p> : null}
+      {rows.length ? rows.map((row) => (
+        <article className="analytics-item" key={row.id || row.kind + ":" + row.customer}>
+          <div>
+            <p className="analytics-title">{row.customer}</p>
+            <div className="analytics-meta">
+              <span>{WORK_KIND[row.kind] || row.kind}</span>
+              {row.salesperson ? <span>{row.salesperson}</span> : null}
+              <span>{row.age} days</span>
+              {row.products?.length ? <span>{row.products.join(", ")}</span> : null}
+              <span>Balance {money(row.credit?.balance)}</span>
+              <span>Overdue {money(row.credit?.overdue)}</span>
+              {row.value_kind && row.amount != null ? (
+                <span>{row.value_kind === "estimated" ? "Estimated" : "Observed"} {money(row.amount)}</span>
+              ) : null}
+              {row.data_date ? <span>Data {row.data_date}</span> : null}
+              {row.basis?.coverage_through ? <span>Coverage {row.basis.coverage_through}</span> : null}
+            </div>
+            <p className="muted">{row.reason}</p>
+            {row.basis?.basis === "live" ? <p className="muted">Latest data</p> : null}
+            {row.basis?.mixed_coverage && row.basis.coverage_note ? <p className="warn">{row.basis.coverage_note}</p> : null}
+            {row.blocked ? <p className="warn">{row.next_step}</p> : (row.next_step ? <p className="muted">{row.next_step}</p> : null)}
+          </div>
+          <div className="row gap">
+            <button type="button" className="secondary" onClick={() => setOpen(row)}>Open</button>
+            {row.evidence?.name ? (
+              <button type="button" className="secondary" onClick={() => drill({ drill: row.evidence })}>Evidence</button>
+            ) : null}
+            {manage && row.action_id ? (
+              <>
+                <button type="button" onClick={() => mark(row, "done")}>Done</button>
+                <button type="button" className="secondary" onClick={() => mark(row, "dropped")}>Drop</button>
+              </>
+            ) : null}
+          </div>
+        </article>
+      )) : <p className="muted">{data.message || "Nothing is due today."}</p>}
+      {open ? createPortal(
+        <div className="modal-backdrop" onClick={() => { setOpen(null); load(); }}>
+          <div className="modal assign-modal follow-modal" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+            <div className="card-head">
+              <h3>{open.customer}</h3>
+              <button type="button" className="ghost" onClick={() => { setOpen(null); load(); }}>Close</button>
+            </div>
+            <CollectionFollowUp
+              customerName={open.customer}
+              actionId={open.action_id || ""}
+              canManage={manage}
+              user={user}
+            />
+          </div>
+        </div>,
+        document.body,
+      ) : null}
+    </div>
+  );
+}
+
 function WeeklyReview({ run, user }) {
   const [data, setData] = useState(null);
   const [err, setErr] = useState("");
@@ -644,6 +759,40 @@ function WeeklyReview({ run, user }) {
         </div>
       </section>
       <section>
+        <h3>Results</h3>
+        <div className="analytics-meta">
+          <span>Open {data.results?.open_count || 0}</span>
+          <span>Overdue {data.results?.overdue_count || 0}</span>
+          <span>Contacts {data.results?.contacts || 0}</span>
+          <span>Kept {data.results?.promises?.kept || 0}</span>
+          <span>Partial {data.results?.promises?.partial || 0}</span>
+          <span>Missed {data.results?.promises?.missed || 0}</span>
+          <span>Pending {data.results?.promises?.pending_refresh || 0}</span>
+        </div>
+        <p className="muted">
+          As of {data.results?.as_of || "—"} · {data.results?.basis === "live" ? "Live" : data.results?.basis || "Live"}
+          {" · "}
+          {data.results?.review_opens || 0} opened this review
+          {data.results?.review_opened_at ? " · " + data.results.review_opened_at : ""}
+          {data.results?.refreshed_at ? " · Refreshed " + data.results.refreshed_at : ""}
+        </p>
+        {data.results?.message ? <p className="warn">{data.results.message}</p> : null}
+        <div className="analytics-list">
+          {(data.results?.rows || []).map((row) => (
+            <article className="analytics-item" key={"result-" + row.id}>
+              <div>
+                <p className="analytics-title">{row.subject_name || row.label}</p>
+                <div className="analytics-meta">
+                  <span>{row.label}</span>
+                  {row.verified_amount ? <span>Allocated {money(row.verified_amount)}</span> : null}
+                  {row.observed_amount ? <span>Observed {money(row.observed_amount)}</span> : null}
+                  {row.evidence_date ? <span>Evidence {row.evidence_date}</span> : null}
+                  {row.pending ? <span>Pending confirmation</span> : null}
+                </div>
+              </div>
+            </article>
+          ))}
+        </div>
         <h3>This week</h3>
         <div className="analytics-list">
           {(data.actions || []).map((row) => (
@@ -656,6 +805,9 @@ function WeeklyReview({ run, user }) {
                   <span>{row.owner}</span>
                   <span>Due {row.due_date}</span>
                   {row.outcome?.label ? <span>{row.outcome.label}</span> : null}
+                  {row.outcome?.verified_amount ? <span>Allocated {money(row.outcome.verified_amount)}</span> : null}
+                  {row.outcome?.observed_amount ? <span>Observed {money(row.outcome.observed_amount)}</span> : null}
+                  {row.outcome?.evidence_date ? <span>Evidence {row.outcome.evidence_date}</span> : null}
                   {row.collection?.label ? (
                     <span>
                       {row.collection.label}
@@ -806,10 +958,29 @@ function ReorderPage({ run, user }) {
                 <tr key={row.name}>
                   <td>
                     {row.name}
+                    <div className="muted">
+                      On hand {units(row.on_hand)}
+                      {row.reserved == null ? " · Reservations and incoming orders are not in this file" : (
+                        " · Reserved " + units(row.reserved) +
+                        " · On time " + units(row.incoming_on_time) +
+                        " · Late " + units(row.incoming_late) +
+                        " · Position " + units(row.position)
+                      )}
+                    </div>
+                    {row.demand_label ? <div className="muted">{row.demand_label}{row.demand_target != null ? " · Target " + units(row.demand_target) : ""}</div> : null}
                     {row.manual ? <div className="muted">Edited</div> : null}
                     {row.needs_review ? <div className="muted">{row.review_reason || "Review this quantity."}</div> : null}
                     {row.pack_reason ? <div className="muted">{row.pack_reason} {row.pack_added ? "+" + units(row.pack_added) : ""}</div> : null}
                     {!row.included && row.defer_reason ? <div className="muted">{row.defer_reason}</div> : null}
+                    {row.explanation ? (
+                      <div className="muted">
+                        {row.explanation.label_kind === "cost_unavailable" ? "Cost unavailable" : row.explanation.label_kind === "historical_cost" ? "Historical cost" : "Snapshot cost"}
+                        {row.explanation.items_coverage ? " · Item sales " + row.explanation.items_coverage : ""}
+                        {row.explanation.stock_date ? " · Stock " + row.explanation.stock_date : ""}
+                      </div>
+                    ) : null}
+                    {row.explanation?.mixed_coverage && row.explanation.coverage_note ? <div className="warn">{row.explanation.coverage_note}</div> : null}
+                    {row.explanation ? <ExplainFigure explanation={row.explanation} /> : null}
                   </td>
                   <td>{row.pace ? units(row.pace) + "/day" : "No recent demand"}{row.pace_days ? <div className="muted">{row.pace_days} days</div> : null}</td>
                   <td className="num">{units(row.fill_to)}</td>

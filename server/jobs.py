@@ -569,6 +569,13 @@ def _run_job(store, run_id):
                         for row in failed_steps[:6]
                     ),
                 )
+            if isinstance(dashboard_doc, dict):
+                try:
+                    from server.explain import attach_saved_explanations
+                    attach_saved_explanations(dashboard_doc, manifest, store)
+                except Exception:
+                    dashboard_doc["explanations"] = {}
+                    dashboard_doc["explanations_message"] = "Number explanations could not be saved with this report."
             store.update_run(run_id, {
                 "status": "succeeded" if usable else "failed",
                 "finished_at": now_utc(),

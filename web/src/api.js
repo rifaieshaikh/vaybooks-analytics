@@ -129,6 +129,7 @@ export const api = {
     const qs = new URLSearchParams(q).toString();
     return req("/api/review" + (qs ? "?" + qs : ""));
   },
+  cash: () => req("/api/cash"),
   reorder: (params) => {
     const q = {};
     Object.entries(params || {}).forEach(([k, v]) => {
@@ -338,6 +339,10 @@ export const api = {
     a.download = filename || "vay_reports.zip";
     a.click();
     URL.revokeObjectURL(url);
+  },
+  worklist: (staff) => {
+    const qs = staff ? "?staff=" + encodeURIComponent(staff) : "";
+    return req("/api/worklist" + qs);
   },
   users: () => req("/api/users"),
   createUser: (body) =>

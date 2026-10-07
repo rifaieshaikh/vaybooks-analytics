@@ -136,6 +136,8 @@ def _hold_map(store):
         fill_to = _num(fields.get("Fill To"))
         lead = _num(fields.get("Lead Days"))
         max_days = _num(fields.get("Max Days Hold"))
+        review_days = _num(fields.get("Review Days"))
+        safety_stock = _num(fields.get("Safety Stock"))
         if uk == DEFAULT_UK:
             default_min = money2(min_hold or 0)
             if max_days is not None:
@@ -146,6 +148,8 @@ def _hold_map(store):
             "fill_to": fill_to,
             "lead_days": int(lead) if lead is not None else None,
             "max_days_hold": int(max_days) if max_days is not None else None,
+            "review_days": int(review_days) if review_days is not None else None,
+            "safety_stock": safety_stock,
             "discontinued": _is_yes(fields.get("Discontinued")),
         }
     return out, default_min, default_max_days
@@ -174,6 +178,8 @@ def _holding_for(holds, default_min, uk, default_max_days=None):
         "own_lead": raw.get("lead_days") is not None,
         "own_max_days": own_max_days,
         "uses_default_max_days": not own_max_days,
+        "review_days": raw.get("review_days"),
+        "safety_stock": raw.get("safety_stock"),
         "discontinued": bool(raw.get("discontinued")),
     }
 
@@ -191,6 +197,8 @@ def save_holding(
     lead_days=None,
     max_days_hold=None,
     discontinued=None,
+    review_days=None,
+    safety_stock=None,
     clear_fill=False,
     clear_max_days=False,
 ):
@@ -212,6 +220,10 @@ def save_holding(
         fields["Max Days Hold"] = max(1, int(max_days_hold))
     elif clear_max_days:
         fields.pop("Max Days Hold", None)
+    if review_days is not None:
+        fields["Review Days"] = int(review_days)
+    if safety_stock is not None:
+        fields["Safety Stock"] = money2(safety_stock)
     if discontinued is not None:
         fields["Discontinued"] = "Yes" if discontinued else "No"
     store.upsert_row({
@@ -701,7 +713,7 @@ def _build_insight(card, buyers=None):
     }
 
 
-def _apply_buy_fields(card, holding, as_of=None):
+def _apply_buy_fields(card, holding, as_of=None, lines=None, supply=None, stock_day="", cost_date="", store=None):
     """Recompute buy/status/position fields after holding changes (e.g. snapshot overlay)."""
     on_hand = float(card.get("qty") or 0)
     pace = float(card.get("pace") or 0)
@@ -755,10 +767,16 @@ def _apply_buy_fields(card, holding, as_of=None):
     card["under_qty"] = under_qty
     card["over_qty"] = over_qty
     card["headline"] = _headline(card)
+    from server.planning import apply_plan
+    apply_plan(
+        card, holding, as_of=as_of, lines=lines, supply=supply,
+        stock_day=stock_day, cost_date=cost_date, store=store,
+    )
+    card["headline"] = _headline(card)
     return card
 
 
-def _card(name, stock_fields, lines, holding, as_of):
+def _card(name, stock_fields, lines, holding, as_of, supply=None, store=None):
     uk = account_uk(name)
     on_hand = _qty_of(stock_fields) if stock_fields else 0.0
     rate = _rate_of(stock_fields) if stock_fields else None
@@ -842,6 +860,17 @@ def _card(name, stock_fields, lines, holding, as_of):
     ytd_qty, ytd_amount, _ytd_times = _qty_in(lines, year_start, year_end, as_of)
     card["ytd_qty"] = ytd_qty
     card["ytd_amount"] = ytd_amount
+    card["headline"] = _headline(card)
+    stock_day = ""
+    cost_date = ""
+    if stock_fields:
+        stock_day = str(stock_fields.get("EffectiveDate") or "")[:10]
+        cost_date = str(stock_fields.get("Cost Date") or "")[:10]
+    from server.planning import apply_plan
+    apply_plan(
+        card, holding, as_of=as_of, lines=lines, supply=supply,
+        stock_day=stock_day, cost_date=cost_date, store=store,
+    )
     card["headline"] = _headline(card)
     return card
 
@@ -980,8 +1009,9 @@ def _stamp_stock_attrs(card, values):
     return card
 
 
-def _build_item_cards(book):
+def _build_item_cards(book, supply=None, store=None):
     """Cards for stocked SKUs plus sales-only (out-of-stock) items."""
+    from server.planning import supply_for
     as_of = book["as_of"]
     holds, default_min = book["holds"], book["default_min"]
     default_max_days = book.get("default_max_days", MAX_DAYS_HOLD_DEFAULT)
@@ -995,7 +1025,7 @@ def _build_item_cards(book):
             continue
         seen.add(key)
         holding = _holding_for(holds, default_min, uk, default_max_days)
-        card = _card(name, fields, lines_map.get(key) or [], holding, as_of)
+        card = _card(name, fields, lines_map.get(key) or [], holding, as_of, supply=supply_for(supply, name), store=store)
         cards.append(_stamp_stock_attrs(card, attrs.get(key)))
     for key, lines in lines_map.items():
         if not key or key in seen or not lines:
@@ -1004,7 +1034,7 @@ def _build_item_cards(book):
         name = lines[0].get("name") or key
         uk = account_uk(name)
         holding = _holding_for(holds, default_min, uk, default_max_days)
-        card = _card(name, None, lines, holding, as_of)
+        card = _card(name, None, lines, holding, as_of, supply=supply_for(supply, name), store=store)
         cards.append(_stamp_stock_attrs(card, attrs.get(key) or attrs.get(uk.lower())))
     return cards, default_min, default_max_days
 
@@ -1012,8 +1042,9 @@ def _build_item_cards(book):
 def purchase_plans(store):
     """Holding-based buy fields. The same buy_qty Item 360 shows for each item."""
     from server.book import load_book
+    from server.planning import load_supply
     book = load_book(store)
-    cards, _, _ = _build_item_cards(book)
+    cards, _, _ = _build_item_cards(book, load_supply(store), store)
     plans = []
     for card in cards:
         plans.append({
@@ -1027,9 +1058,18 @@ def purchase_plans(store):
             "min_hold": card.get("min_hold") or 0,
             "lead_days": int(card.get("lead_days") or 0),
             "on_hand": card.get("qty") or 0,
+            "reserved": card.get("reserved"),
+            "incoming_on_time": card.get("incoming_on_time"),
+            "incoming_late": card.get("incoming_late"),
+            "position": card.get("position"),
+            "supply_label": card.get("supply_label") or "",
+            "demand_label": card.get("demand_label") or "",
+            "demand_target": card.get("demand_target"),
+            "past_check": card.get("past_check"),
             "discontinued": bool(card.get("discontinued")),
             "reason": _next_move(card),
-            "unit_cost": card.get("rate"),
+            "unit_cost": card.get("plan_unit_cost") if "plan_unit_cost" in card else card.get("rate"),
+            "cost_label": card.get("cost_label") or "",
             "supplier": card.get("supplier") or "",
         })
     return plans
@@ -1037,10 +1077,11 @@ def purchase_plans(store):
 
 def list_items(store, params):
     from server.book import load_book
+    from server.planning import load_supply
     book = load_book(store)
     page, limit = _page_limit(params)
     as_of = book["as_of"]
-    cards, default_min, default_max_days = _build_item_cards(book)
+    cards, default_min, default_max_days = _build_item_cards(book, load_supply(store), store)
     options = {
         "item": sorted({c["name"] for c in cards if c["name"]}),
         "status": sorted({c["status_label"] for c in cards if c["status_label"]}),
@@ -1152,8 +1193,12 @@ def get_item(store, uk):
     lines = lines or []
     if stock_fields is None and not lines:
         return None
+    from server.planning import load_supply, supply_for
     holding = _holding_for(holds, default_min, uk, default_max_days)
-    card = _card(name, stock_fields, lines, holding, as_of)
+    card = _card(
+        name, stock_fields, lines, holding, as_of,
+        supply=supply_for(load_supply(store), name), store=store,
+    )
     buyers = _buyers(lines, as_of)
     usual = ""
     if buyers:
@@ -1169,6 +1214,8 @@ def get_item(store, uk):
             "min_hold": holding["min_hold"],
             "fill_to": holding.get("fill_to"),
             "lead_days": holding.get("lead_days") or 0,
+            "review_days": holding.get("review_days"),
+            "safety_stock": holding.get("safety_stock"),
             "max_days_hold": holding.get("max_days_hold") or MAX_DAYS_HOLD_DEFAULT,
             "own_min": holding.get("own_min") or False,
             "own_max_days": holding.get("own_max_days") or False,

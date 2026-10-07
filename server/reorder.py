@@ -111,6 +111,14 @@ def _line_from_plan(plan, edit, manual):
     return {
         "name": plan.get("name") or "",
         "on_hand": plan.get("on_hand"),
+        "reserved": plan.get("reserved"),
+        "incoming_on_time": plan.get("incoming_on_time"),
+        "incoming_late": plan.get("incoming_late"),
+        "position": plan.get("position"),
+        "supply_label": plan.get("supply_label") or "",
+        "demand_label": plan.get("demand_label") or "",
+        "demand_target": plan.get("demand_target"),
+        "past_check": plan.get("past_check"),
         "suggested_qty": base,
         "qty": qty,
         "manual": manual,
@@ -130,7 +138,7 @@ def _line_from_plan(plan, edit, manual):
         "supplier": supplier,
         "reason": plan.get("reason") or "",
         "unit_cost": cost,
-        "cost_label": "Uncosted" if cost in ("", None) else "Snapshot cost",
+        "cost_label": plan.get("cost_label") or ("Uncosted" if cost in ("", None) else "Snapshot cost"),
         "discontinued": bool(plan.get("discontinued")),
     }
 

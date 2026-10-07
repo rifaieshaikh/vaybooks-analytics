@@ -16,6 +16,11 @@ export const REQUIRED_FIELDS = {
   items: ["Date", "Item Name", "Qty", "Rate"],
   stock: ["Item Name", "Qty", "P.Price"],
   payments: ["Date", "Account Name", "Amount"],
+  reservation: ["Item Name", "Qty", "Need By"],
+  incoming: ["Item Name", "Qty", "Expected Date", "Confirmed"],
+  item_cost: ["Item Name", "Cost", "Effective Date"],
+  opening_cash: ["Date", "Amount"],
+  payable: ["Account Name", "Amount", "Due Date"],
   party: ["Account Name", "Group"],
 };
 
@@ -89,6 +94,11 @@ export const TYPE_META = {
     group: false,
     item: true,
   },
+  reservation: { label: "Reservations", partyLabel: "", dates: true, rep: false, group: false, item: true },
+  incoming: { label: "Incoming", partyLabel: "", dates: true, rep: false, group: false, item: true },
+  item_cost: { label: "Item cost", partyLabel: "", dates: true, rep: false, group: false, item: true },
+  opening_cash: { label: "Opening cash", partyLabel: "", dates: true, rep: false, group: false, item: false },
+  payable: { label: "Payables", partyLabel: "Supplier", dates: true, rep: false, group: false, item: false },
 };
 
 export const NAV = [
@@ -142,6 +152,7 @@ export const NAV = [
       { id: "receipt", label: "Receipts", kind: "data", type: "receipt", perm: "receipt.view" },
       { id: "credit_note", label: "Credit notes", kind: "data", type: "credit_note", perm: "credit_note.view" },
       { id: "payments", label: "Payments", kind: "data", type: "payments", perm: "payments.view" },
+      { id: "cash", label: "Cash", kind: "cash", perm: "payments.view" },
     ],
   },
   {
@@ -165,6 +176,7 @@ export const NAV = [
       { id: "scorecard", label: "Scorecard", kind: "analytics", section: "scorecard", perm: "reports.view.scorecard" },
       { id: "sales-change", label: "Sales change", kind: "analytics", section: "sales-change", perm: "reports.view.scorecard" },
       { id: "customer-movement", label: "Customer movement", kind: "analytics", section: "customer-movement", perm: "reports.view.scorecard" },
+      { id: "today", label: "Today", kind: "analytics", section: "today", perm: "reports.view.followup" },
       { id: "collection-worklist", label: "Collection worklist", kind: "analytics", section: "collection", perm: "reports.view.followup" },
       { id: "stock-decisions", label: "Stock decisions", kind: "analytics", section: "stock", perm: "reports.view.items" },
       { id: "data-quality", label: "Data quality", kind: "analytics", section: "quality", perm: "reports.view.quality" },

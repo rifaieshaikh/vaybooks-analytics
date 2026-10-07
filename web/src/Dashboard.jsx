@@ -3,6 +3,7 @@ import { ChartBox } from "./Charts";
 import { EmptyCard } from "./FilterBar";
 import SnapshotPicker from "./SnapshotPicker";
 import { api } from "./api";
+import ExplainFigure from "./ExplainFigure";
 import { hashSet, initials, money } from "./format";
 import { CHART, can } from "./theme";
 
@@ -102,7 +103,7 @@ function totalHint(source) {
   return "all years";
 }
 
-function PeriodRow({ label, hint, sales, collection }) {
+function PeriodRow({ label, hint, sales, collection, salesExplain, collectionExplain, gapExplain }) {
   const stats = pairStats(sales, collection);
   if (!stats) return null;
   const max = Math.max(stats.sales, stats.collection, 1);
@@ -136,6 +137,13 @@ function PeriodRow({ label, hint, sales, collection }) {
           <div className="value">{stats.rate == null ? "—" : stats.rate + "%"}</div>
         </div>
       </div>
+      {salesExplain || collectionExplain || gapExplain ? (
+        <div className="row gap">
+          <ExplainFigure explanation={salesExplain} label="Explain sales" />
+          <ExplainFigure explanation={collectionExplain} label="Explain collection" />
+          <ExplainFigure explanation={gapExplain} label="Explain gap" />
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -297,6 +305,7 @@ export default function DashboardPage({ user, run, runs = [], busy = false, onSe
   const canIssues = can(user, "reports.view.issues");
   const canProfit = can(user, "reports.view.profit");
   const kpis = canPerformance && hasKey(data, "kpis") ? kpiMap(data.kpis) : {};
+  const explanations = data?.explanations || {};
   const customers = canCustomers && hasKey(data, "customers") ? data.customers : null;
   const stock = canStock && hasKey(data, "stock") ? data.stock : null;
   const invoices = canSales && hasKey(data, "invoices") ? data.invoices : null;
@@ -461,12 +470,13 @@ export default function DashboardPage({ user, run, runs = [], busy = false, onSe
       {showOfficialHero ? (
         <div className="dash-hero">
           {showSections ? <div className="dash-section">Official snapshot{snapLabel ? " · " + snapLabel : ""}</div> : null}
-          <PeriodRow label="MTD" sales={kpis.mtd_sales} collection={kpis.mtd_collection} />
+          {data?.explanations_message ? <p className="muted">{data.explanations_message}</p> : null}
+          <PeriodRow label="MTD" sales={kpis.mtd_sales} collection={kpis.mtd_collection} salesExplain={explanations.mtd_sales} collectionExplain={explanations.mtd_collection} gapExplain={explanations.mtd_gap} />
           {kpis.d15_sales != null || kpis.d15_collection != null ? (
-            <PeriodRow label="15 days" sales={kpis.d15_sales} collection={kpis.d15_collection} />
+            <PeriodRow label="15 days" sales={kpis.d15_sales} collection={kpis.d15_collection} salesExplain={explanations.d15_sales} collectionExplain={explanations.d15_collection} gapExplain={explanations.d15_gap} />
           ) : null}
           {kpis.ytd_sales != null || kpis.ytd_collection != null ? (
-            <PeriodRow label="YTD" hint={fy || ""} sales={kpis.ytd_sales} collection={kpis.ytd_collection} />
+            <PeriodRow label="YTD" hint={fy || ""} sales={kpis.ytd_sales} collection={kpis.ytd_collection} salesExplain={explanations.ytd_sales} collectionExplain={explanations.ytd_collection} gapExplain={explanations.ytd_gap} />
           ) : null}
           {showTotal ? (
             <PeriodRow
@@ -474,6 +484,9 @@ export default function DashboardPage({ user, run, runs = [], busy = false, onSe
               hint={totalSameAsYtd ? "same as YTD · " + totalHint(data?.total_source) : totalHint(data?.total_source)}
               sales={kpis.total_sales}
               collection={kpis.total_collection}
+              salesExplain={explanations.total_sales}
+              collectionExplain={explanations.total_collection}
+              gapExplain={explanations.total_gap}
             />
           ) : null}
           {mtdStats && mtdStats.gap > 0 ? (
@@ -726,6 +739,13 @@ export default function DashboardPage({ user, run, runs = [], busy = false, onSe
           {stock?.slow?.uncosted ? <p className="muted">{stock.slow.uncosted} slow item{stock.slow.uncosted === 1 ? "" : "s"} excluded — missing cost</p> : null}
           {stock?.slow?.status === "unavailable" && stock?.slow?.reason !== stock?.cover?.reason ? (
             <p className="muted">{stock.slow.reason}</p>
+          ) : null}
+          {explanations.ar_balance || explanations.stock_cover_days || explanations.slow_stock_value ? (
+            <div className="row gap">
+              <ExplainFigure explanation={explanations.ar_balance} label="Explain AR balance" />
+              <ExplainFigure explanation={explanations.stock_cover_days} label="Explain stock cover" />
+              <ExplainFigure explanation={explanations.slow_stock_value} label="Explain slow stock" />
+            </div>
           ) : null}
         </div>
       ) : null}

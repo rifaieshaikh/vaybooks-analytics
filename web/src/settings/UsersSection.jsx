@@ -49,6 +49,7 @@ function UsersTable({ users, roles, filters, setFilters, sort, dir, setSort, set
               <SortTh id="username" label="Username" sort={sort} dir={dir} onSort={onSort} />
               <SortTh id="role" label="Role" sort={sort} dir={dir} onSort={onSort} />
               <SortTh id="status" label="Status" sort={sort} dir={dir} onSort={onSort} />
+              <th>Sales reps</th>
               {canManage ? <th></th> : null}
             </tr>
           </thead>
@@ -64,6 +65,22 @@ function UsersTable({ users, roles, filters, setFilters, sort, dir, setSort, set
                   ) : u.role}
                 </td>
                 <td><span className={u.enabled ? "pill ok" : "pill err"}>{u.enabled ? "Active" : "Disabled"}</span></td>
+                <td>
+                  {canManage ? (
+                    <input
+                      key={(u.sales_reps || []).join(",")}
+                      defaultValue={(u.sales_reps || []).join(", ")}
+                      placeholder="Asha, Rita"
+                      aria-label={"Sales reps for " + u.username}
+                      onBlur={(e) => {
+                        const sales_reps = e.target.value.split(",").map((name) => name.trim()).filter(Boolean);
+                        const current = (u.sales_reps || []).join(", ");
+                        if (sales_reps.join(", ") === current) return;
+                        api.patchUser(u.username, { sales_reps }).then(refresh).catch((err) => setErr(err.message));
+                      }}
+                    />
+                  ) : (u.sales_reps || []).join(", ") || "—"}
+                </td>
                 {canManage ? (
                 <td>
                   <button className="secondary" onClick={() => {

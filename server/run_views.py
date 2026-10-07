@@ -498,11 +498,23 @@ def _overlay_item(store, detail, holds=None, default_min=None, default_max_days=
     if raw_as_of:
         from vay.dates import parse_date
         as_of = parse_date(raw_as_of)
-    _apply_buy_fields(out, holding, as_of=as_of)
+    from server.planning import lines_by_item, load_supply, supply_for
+    item_lines = lines_by_item(store)
+    key = clean_text(out.get("name") or uk).lower()
+    _apply_buy_fields(
+        out, holding, as_of=as_of,
+        lines=item_lines.get(key) or [],
+        supply=supply_for(load_supply(store), out.get("name")),
+        stock_day=str(out.get("stock_day") or "")[:10],
+        cost_date=str(out.get("cost_date") or "")[:10],
+        store=store,
+    )
     out["holding"] = {
         "min_hold": holding["min_hold"],
         "fill_to": holding.get("fill_to"),
         "lead_days": holding.get("lead_days") or 0,
+        "review_days": holding.get("review_days"),
+        "safety_stock": holding.get("safety_stock"),
         "max_days_hold": holding.get("max_days_hold") or default_max_days,
         "own_min": holding.get("own_min") or False,
         "own_max_days": holding.get("own_max_days") or False,
@@ -1242,17 +1254,26 @@ def rep_slice(store, views, uk, section=""):
     return _stamp_entity(store, "rep", profile)
 
 
-def _list_item_cards(views, holds, default_min, default_max_days):
+def _list_item_cards(views, holds, default_min, default_max_days, store=None):
     """Apply current holdings without copying each item's nested history."""
-    from vay.dates import parse_date
+    from vay.dates import parse_date, clean_text as clean
+    from server.planning import lines_by_item, load_supply, supply_for
     as_of = parse_date(views.get("as_of")) if views.get("as_of") else None
+    supply = load_supply(store) if store is not None else {}
+    item_lines = lines_by_item(store) if store is not None else {}
     cards = []
     for card in (views.get("items") or []):
         out = dict(card)
         if as_of is None and out.get("as_of"):
             as_of = parse_date(out.get("as_of"))
         holding = _holding_for(holds, default_min, account_uk(out.get("uk") or ""), default_max_days)
-        _apply_buy_fields(out, holding, as_of=as_of)
+        key = clean(out.get("name") or "").lower()
+        _apply_buy_fields(
+            out, holding, as_of=as_of,
+            lines=item_lines.get(key) or [],
+            supply=supply_for(supply, out.get("name")),
+            store=store,
+        )
         cards.append(out)
     return cards
 
@@ -1263,7 +1284,7 @@ def snapshot_list_items(store, params, views):
     from server.items360 import _page_limit
     page, limit = _page_limit(params)
     holds, default_min, default_max_days = _hold_map(store)
-    cards = _list_item_cards(views, holds, default_min, default_max_days)
+    cards = _list_item_cards(views, holds, default_min, default_max_days, store)
     options = views.get("item_options") or {
         "item": sorted({c["name"] for c in cards if c.get("name")}),
         "status": sorted({c["status_label"] for c in cards if c.get("status_label")}),

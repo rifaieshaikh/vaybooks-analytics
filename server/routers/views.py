@@ -457,6 +457,7 @@ def api_save_item_holding(uk: str, body: ItemHoldingBody, user=Depends(require_u
     saved = save_holding(
         store, uk, min_hold=body.min_hold, fill_to=body.fill_to, lead_days=body.lead_days,
         max_days_hold=body.max_days_hold, discontinued=body.discontinued,
+        review_days=body.review_days, safety_stock=body.safety_stock,
         clear_fill=body.clear_fill, clear_max_days=body.clear_max_days,
     )
     if not saved:

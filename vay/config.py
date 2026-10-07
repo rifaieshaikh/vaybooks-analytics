@@ -71,6 +71,11 @@ REQUIRED_COLUMNS = {
     "items": ["Date", "Item Name", "Qty", "Rate"],
     "stock": ["Item Name", "Qty", "P.Price"],
     "payments": ["Date", "Account Name", "Amount"],
+    "reservation": ["Item Name", "Qty", "Need By"],
+    "incoming": ["Item Name", "Qty", "Expected Date", "Confirmed"],
+    "item_cost": ["Item Name", "Cost", "Effective Date"],
+    "opening_cash": ["Date", "Amount"],
+    "payable": ["Account Name", "Amount", "Due Date"],
 }
 
 EXCEL_SHEET_NAMES = {

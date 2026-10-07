@@ -2,12 +2,27 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import datetime, timedelta
 
-from server.collection import attach_collection_summaries
-from vay.dates import clean_text, number_, parse_date
-from vay.phase3 import data_fix_outcome, purchase_outcome, received_since, recovery_outcome
+from server.collection import (
+    ALLOCATION_TYPE,
+    PENDING_MESSAGE,
+    PROMISE_TYPE,
+    _basis_label,
+    _bundle,
+    _key,
+    _load_sources,
+    _rows,
+    attach_collection_summaries,
+)
+from server.org_policy import SETTING_TYPE
+from vay.dates import clean_text, number_, parse_date, today_ist
+from vay.phase3 import data_fix_outcome, received_since, recovery_outcome
+
+REVIEW_OPENS_UK = "review_opens"
+SALE_PENDING = "Sale confirmation is pending a refresh."
 
 ACTION_TYPE = "action"
 KINDS = ("collection", "recovery", "purchase", "data_fix")
@@ -134,50 +149,194 @@ def _later_report(store, assigned_at):
     return False
 
 
-def _later_stock_file(store, assigned_at):
-    assigned = str(assigned_at or "")[:10]
-    for doc in store.rows_of_type("stock") or []:
-        uid = str(doc.get("source_upload_id") or "")
-        if not uid:
+def _assigned_day(value):
+    return str(value or "")[:10]
+
+
+def _later_than(day, assigned):
+    return bool(day and assigned and day > assigned)
+
+
+def _cap_amount(total, cap):
+    total = round(float(total or 0), 2)
+    if cap in ("", None):
+        return total
+    return round(min(total, number_(cap)), 2)
+
+
+def _open_collections(actions):
+    rows = [
+        row for row in actions or []
+        if row.get("action_type") == "collection" and row.get("status") == "open"
+    ]
+    rows.sort(key=lambda row: (row.get("due_date") or "9999-99-99", row.get("assigned_at") or "", row.get("id") or ""))
+    return rows
+
+
+def _oldest_open(actions, customer):
+    key = _key(customer)
+    for row in _open_collections(actions):
+        if _key(row.get("subject_name")) == key:
+            return row
+    return None
+
+
+def _collection_outcomes(store, actions):
+    """Each receipt counts on one open collection task. A single task stays capped."""
+    sources = _load_sources(store)
+    by_source = {(row.get("source_type"), row.get("uk")): row for row in sources if row.get("uk")}
+    promises = {row.get("id"): row for row in _rows(store, PROMISE_TYPE)}
+    open_ids = {row.get("id") for row in _open_collections(actions)}
+    verified = {row.get("id"): [] for row in actions or []}
+    observed = {row.get("id"): [] for row in actions or []}
+    used = {}
+    for alloc in _rows(store, ALLOCATION_TYPE):
+        if alloc.get("voided_at") or alloc.get("basis") not in ("source_confirmed", "confirmed_inferred"):
             continue
-        upload = store.get_upload(uid) if hasattr(store, "get_upload") else None
-        created = (upload or {}).get("created_at")
-        text = created.strftime("%Y-%m-%d") if hasattr(created, "strftime") else str(created or "")[:10]
-        if text and assigned and text > assigned:
+        promise = promises.get(alloc.get("promise_id")) or {}
+        customer = promise.get("customer_name") or ""
+        target = None
+        linked = promise.get("action_id") or ""
+        if linked in open_ids:
+            target = next((row for row in actions or [] if row.get("id") == linked), None)
+        if target is None:
+            target = _oldest_open(actions, customer)
+        if target is None:
+            continue
+        source = by_source.get((alloc.get("source_type") or "", alloc.get("source_uk") or "")) or {}
+        amount = round(float(alloc.get("amount") or 0), 2)
+        if amount <= 0:
+            continue
+        token = (alloc.get("source_type") or "", alloc.get("source_uk") or "")
+        used[token] = round(used.get(token, 0.0) + amount, 2)
+        verified[target.get("id")].append({
+            "kind": "allocated",
+            "amount": amount,
+            "date": source.get("date") or "",
+            "basis": alloc.get("basis") or "",
+            "basis_label": _basis_label(alloc),
+            "source_uk": alloc.get("source_uk") or "",
+            "source_type": alloc.get("source_type") or "",
+        })
+    for source in sources:
+        token = (source.get("source_type") or "", source.get("uk") or "")
+        remainder = round(float(source.get("amount") or 0) - used.get(token, 0.0), 2)
+        if remainder <= 0.009:
+            continue
+        target = _oldest_open(actions, source.get("name"))
+        if target is None:
+            continue
+        if not _later_than(source.get("date") or "", _assigned_day(target.get("assigned_at"))):
+            continue
+        observed[target.get("id")].append({
+            "kind": "observed",
+            "label": "Received since assigned",
+            "amount": remainder,
+            "date": source.get("date") or "",
+            "source_uk": source.get("uk") or "",
+            "source_type": source.get("source_type") or "",
+        })
+    later_customers = set()
+    for source in sources:
+        if source.get("date"):
+            later_customers.add((_key(source.get("name")), source.get("date")))
+    out = {}
+    for action in _open_collections(actions):
+        action_id = action.get("id")
+        verified_rows = verified.get(action_id) or []
+        observed_rows = observed.get(action_id) or []
+        verified_amount = round(sum(row["amount"] for row in verified_rows), 2)
+        observed_amount = _cap_amount(sum(row["amount"] for row in observed_rows), action.get("amount"))
+        assigned = _assigned_day(action.get("assigned_at"))
+        has_later = any(day > assigned for key, day in later_customers if key == _key(action.get("subject_name")))
+        evidence = verified_rows + observed_rows
+        dates = [row.get("date") or "" for row in evidence if row.get("date")]
+        pending = not has_later and verified_amount <= 0 and observed_amount <= 0
+        if pending:
+            label = PENDING_MESSAGE
+            amount = None
+        elif observed_amount > 0:
+            label = "Received since assigned"
+            amount = observed_amount
+        elif verified_amount > 0:
+            label = "Allocated"
+            amount = verified_amount
+        else:
+            label = "No receipts since assigned"
+            amount = 0.0
+        out[action_id] = {
+            "label": label,
+            "amount": amount,
+            "verified_amount": verified_amount,
+            "observed_amount": observed_amount if not pending else None,
+            "evidence": evidence,
+            "evidence_date": max(dates) if dates else "",
+            "pending": pending,
+        }
+    return out
+
+
+def _any_later(rows, assigned):
+    assigned = _assigned_day(assigned)
+    for row in rows or []:
+        if _later_than(str(row.get("date") or "")[:10], assigned):
             return True
     return False
 
 
-def _on_hand(store, name):
-    total = 0.0
-    found = False
-    slow = False
-    key = (name or "").strip().lower()
+def _stock_after(store, name, assigned):
+    """Latest on-hand for this item on a stock snapshot dated after assignment."""
+    assigned = _assigned_day(assigned)
+    key = clean_text(name).lower()
+    grouped = {}
     for doc in store.rows_of_type("stock") or []:
         fields = doc.get("fields") or {}
         if clean_text(fields.get("Item Name")).lower() != key:
             continue
-        found = True
-        total += number_(fields.get("Qty"))
-    return total, found, slow
+        eff = str(fields.get("EffectiveDate") or doc.get("effective_date") or "")[:10]
+        if not _later_than(eff, assigned):
+            continue
+        grouped[eff] = round(grouped.get(eff, 0.0) + number_(fields.get("Qty")), 2)
+    if not grouped:
+        return "", None
+    latest = max(grouped)
+    return latest, grouped[latest]
 
 
-def _stock_index(store, report_date):
-    from server.phase2 import stock_headline
-    from vay.dates import today_ist
-    when = report_date or today_ist().strftime("%Y-%m-%d")
-    try:
-        headline = stock_headline(store, when)
-    except (TypeError, ValueError):
-        return {}
-    return {str(row.get("name") or "").strip().lower(): row for row in headline.get("rows") or []}
+def _item_minimum(store, name):
+    from server.items360 import _hold_map, _holding_for, account_uk
+    holds, default_min, default_max = _hold_map(store)
+    holding = _holding_for(holds, default_min, account_uk(name), default_max)
+    return float(holding.get("min_hold") or 0)
+
+
+def _purchase_result(store, name, assigned):
+    snap_date, on_hand = _stock_after(store, name, assigned)
+    if not snap_date:
+        return {
+            "resolved": False,
+            "label": "Waiting for the next stock file",
+            "amount": None,
+            "pending": True,
+            "evidence_date": "",
+        }
+    minimum = _item_minimum(store, name)
+    covered = on_hand + 1e-9 >= minimum
+    return {
+        "resolved": covered,
+        "label": "On hand meets the minimum." if covered else "Stock risk is still open",
+        "amount": on_hand,
+        "minimum": minimum,
+        "pending": False,
+        "evidence_date": snap_date,
+    }
 
 
 def attach_outcomes(store, actions, quality_messages=None, report_date=None):
-    receipts = _dated(store, "receipt", ("Account Name", "Party Name"), "Amount")
     sales = _dated(store, "sales", ("Party Name", "Account Name"), "Net Amount")
+    receipts = _dated(store, "receipt", ("Account Name", "Party Name"), "Amount")
     messages = list(quality_messages or [])
-    stock = _stock_index(store, report_date) if any((a or {}).get("action_type") == "purchase" for a in actions or []) else {}
+    collection = _collection_outcomes(store, actions)
     out = []
     for action in actions or []:
         row = dict(action)
@@ -185,23 +344,153 @@ def attach_outcomes(store, actions, quality_messages=None, report_date=None):
         assigned = row.get("assigned_at") or ""
         name = row.get("subject_name") or ""
         if kind == "collection":
-            row["outcome"] = received_since(receipts, name, assigned, row.get("amount"))
+            row["outcome"] = collection.get(row.get("id")) or received_since(receipts, name, assigned, row.get("amount"))
         elif kind == "recovery":
-            row["outcome"] = recovery_outcome(sales, name, assigned)
+            if not _any_later(sales, assigned):
+                row["outcome"] = {
+                    "bought_again": False,
+                    "label": SALE_PENDING,
+                    "amount": None,
+                    "evidence_date": "",
+                    "pending": True,
+                }
+            else:
+                row["outcome"] = recovery_outcome(sales, name, assigned)
         elif kind == "purchase":
-            item = stock.get(name.strip().lower()) or {}
-            on_hand = item.get("on_hand")
-            if on_hand is None:
-                on_hand, _found, _slow = _on_hand(store, name)
-            row["outcome"] = purchase_outcome(
-                on_hand, row.get("amount"), bool(item.get("slow")), _later_stock_file(store, assigned),
-            )
+            row["outcome"] = _purchase_result(store, name, assigned)
         elif kind == "data_fix":
             row["outcome"] = data_fix_outcome(row.get("quality_message"), messages, _later_report(store, assigned))
         else:
             row["outcome"] = {"label": ""}
         out.append(row)
     return attach_collection_summaries(store, out)
+
+
+def _rep_map(store):
+    last = {}
+    when = {}
+    for doc in store.rows_of_type("sales") or []:
+        fields = doc.get("fields") or {}
+        name = clean_text(fields.get("Party Name") or fields.get("Account Name"))
+        rep = clean_text(fields.get("Sales Rep"))
+        day = str(fields.get("Date") or "")
+        if not name:
+            continue
+        key = _key(name)
+        if key not in when or day >= when[key]:
+            when[key] = day
+            last[key] = rep
+    return last
+
+
+def _customer_in_scope(scope, reps, name):
+    wanted = scope.get("reps") if scope else None
+    if wanted is None:
+        return True
+    allowed = {clean_text(item).lower() for item in wanted if clean_text(item)}
+    if not allowed:
+        return False
+    return reps.get(_key(name), "").lower() in allowed
+
+
+def _scoped_actions(actions, scope, reps):
+    if not scope or scope.get("reps") is None:
+        return list(actions or [])
+    out = []
+    for row in actions or []:
+        if row.get("action_type") in ("purchase", "data_fix"):
+            continue
+        if _customer_in_scope(scope, reps, row.get("subject_name")):
+            out.append(row)
+    return out
+
+
+def record_review_open(store, username, report_date):
+    """One open per person and report date. A later open updates the time."""
+    username = clean_text(username)
+    report_date = str(report_date or "")[:10]
+    existing = store.find_row(SETTING_TYPE, REVIEW_OPENS_UK) if hasattr(store, "find_row") else None
+    fields = dict((existing or {}).get("fields") or {})
+    try:
+        opens = json.loads(fields.get("Opens") or "[]")
+    except (TypeError, ValueError):
+        opens = []
+    if not isinstance(opens, list):
+        opens = []
+    stamp = _now()
+    found = False
+    for item in opens:
+        if not isinstance(item, dict):
+            continue
+        if item.get("user") == username and item.get("report_date") == report_date:
+            item["opened_at"] = stamp
+            found = True
+            break
+    if not found and username and report_date:
+        opens.append({"user": username, "report_date": report_date, "opened_at": stamp})
+    fields["Opens"] = json.dumps(opens)
+    store.upsert_row({
+        "type": SETTING_TYPE,
+        "uk": REVIEW_OPENS_UK,
+        "source_upload_id": "",
+        "fields": fields,
+    })
+    return [item for item in opens if isinstance(item, dict) and item.get("report_date") == report_date]
+
+
+def _result_row(action):
+    outcome = action.get("outcome") or {}
+    return {
+        "id": action.get("id") or "",
+        "action_type": action.get("action_type") or "",
+        "subject_name": action.get("subject_name") or "",
+        "status": action.get("status") or "",
+        "due_date": action.get("due_date") or "",
+        "label": outcome.get("label") or "",
+        "verified_amount": outcome.get("verified_amount"),
+        "observed_amount": outcome.get("observed_amount") if "observed_amount" in outcome else outcome.get("amount"),
+        "evidence_date": outcome.get("evidence_date") or "",
+        "pending": bool(outcome.get("pending")),
+        "basis": "live",
+    }
+
+
+def build_results(store, actions, scope, report_date, run, opens):
+    """Derived review summary. It does not claim an action caused a payment or a sale."""
+    reps = _rep_map(store)
+    scoped = _scoped_actions(actions, scope, reps)
+    as_of = today_ist().strftime("%Y-%m-%d")
+    _today, contacts, promises, _disputes = _bundle(store, as_of)
+    open_rows = [row for row in scoped if row.get("status") == "open"]
+    overdue = [row for row in open_rows if row.get("due_date") and row["due_date"] < as_of]
+    promise_counts = {"kept": 0, "partial": 0, "missed": 0, "pending_refresh": 0, "open": 0}
+    for row in promises:
+        if not _customer_in_scope(scope, reps, row.get("customer_name")):
+            continue
+        status = row.get("payment_status") or ""
+        if status in promise_counts:
+            promise_counts[status] += 1
+    contact_count = sum(1 for row in contacts if _customer_in_scope(scope, reps, row.get("customer_name")))
+    review_opens = [item for item in opens or [] if item.get("user")]
+    latest = ""
+    for item in review_opens:
+        stamp = item.get("opened_at") or ""
+        if stamp > latest:
+            latest = stamp
+    return {
+        "as_of": as_of,
+        "report_date": str(report_date or "")[:10],
+        "basis": "live",
+        "message": (scope or {}).get("message") or "",
+        "open_count": len(open_rows),
+        "overdue_count": len(overdue),
+        "contacts": contact_count,
+        "promises": promise_counts,
+        "review_opens": len({item.get("user") for item in review_opens}),
+        "review_opened_at": latest,
+        "refreshed_at": str((run or {}).get("finished_at") or ""),
+        "rows": [_result_row(row) for row in scoped],
+    }
 
 
 def _purchase_choice(stock_rows):

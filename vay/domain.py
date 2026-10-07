@@ -37,6 +37,11 @@ SOURCE_GRAINS = {
     "stock": {"entity": "stock_snapshot", "kind": "snapshot", "grain": "stock_position"},
     "party": {"entity": "customer", "kind": "snapshot", "grain": "party_master"},
     "customer": {"entity": "customer", "kind": "snapshot", "grain": "customer_balance"},
+    "reservation": {"entity": "product", "kind": "event", "grain": "reservation"},
+    "incoming": {"entity": "product", "kind": "event", "grain": "incoming_stock"},
+    "item_cost": {"entity": "product", "kind": "event", "grain": "item_cost"},
+    "opening_cash": {"entity": "organization", "kind": "event", "grain": "opening_cash"},
+    "payable": {"entity": "payment", "kind": "event", "grain": "payable"},
 }
 
 EVENT_SOURCE_TYPES = tuple(k for k, v in SOURCE_GRAINS.items() if v["kind"] == "event")
@@ -56,6 +61,11 @@ CANONICAL_FIELDS = {
     "payments": ("Date", "Account Name", "Amount"),
     "party": ("Account Name", "Group"),
     "customer": ("Account Name", "Group", "Balance"),
+    "reservation": ("Item Name", "Qty", "Need By"),
+    "incoming": ("Item Name", "Qty", "Expected Date", "Confirmed"),
+    "item_cost": ("Item Name", "Cost", "Effective Date"),
+    "opening_cash": ("Date", "Amount"),
+    "payable": ("Account Name", "Amount", "Due Date"),
 }
 
 METRIC_IDS = (

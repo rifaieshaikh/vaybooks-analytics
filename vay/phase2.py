@@ -835,16 +835,58 @@ def stock_decisions(items, stock_rows, report_date):
     }
 
 
+def _sale_day(when):
+    if when is None:
+        return ""
+    if hasattr(when, "strftime"):
+        return when.strftime("%Y-%m-%d")
+    return str(when)[:10]
+
+
+def cost_for_sale(costs, name, when):
+    """Latest cost on or before the sale. A later cost does not reprice it.
+
+    A plain number is the undated snapshot price. A missing cost stays missing.
+    """
+    entry = (costs or {}).get(name) if name else None
+    if entry is None:
+        return None, ""
+    if isinstance(entry, (int, float)):
+        return float(entry), "snapshot"
+    if not isinstance(entry, dict):
+        return None, ""
+    history = entry.get("history") or []
+    sale = _sale_day(when)
+    best_day = ""
+    best = None
+    for row in history:
+        day = str(row.get("date") or "")[:10]
+        cost = row.get("cost")
+        if cost is None or not day or not sale or day > sale:
+            continue
+        if day >= best_day:
+            best_day = day
+            best = float(cost)
+    if best is not None:
+        return best, "historical"
+    snapshot = entry.get("snapshot")
+    if snapshot is not None:
+        return float(snapshot), "snapshot"
+    return None, ""
+
+
 def gross_margin_periods(items, costs, report_date, tax_rate):
     """Margin for each window. A window with a missing cost is unavailable."""
     windows = period_windows(report_date)
     rate = float(tax_rate or 0)
     out = {}
+    current_kinds = []
     for key, window in windows.items():
         sales = 0.0
         cogs = 0.0
         seen = False
         missing = False
+        kinds = []
         for row in items or []:
             when = row.get("date")
             if not _in(when, window):
@@ -855,12 +897,15 @@ def gross_margin_periods(items, costs, report_date, tax_rate):
                 continue
             seen = True
             name = (row.get("name") or "").strip()
-            cost = costs.get(name) if name else None
+            cost, kind = cost_for_sale(costs, name, when)
             if cost is None:
                 missing = True
                 break
+            kinds.append(kind)
             sales += float(qty) * float(price)
             cogs += float(qty) * float(cost)
+        if key == "current":
+            current_kinds = kinds
         if not seen or missing or sales == 0:
             out[key] = None
             continue
@@ -869,6 +914,12 @@ def gross_margin_periods(items, costs, report_date, tax_rate):
             out[key] = None
             continue
         out[key] = round(100.0 * (net - cogs) / net, 1)
+    if current_kinds and "historical" in current_kinds and "snapshot" not in current_kinds:
+        out["cost_label"] = "Historical cost"
+    elif current_kinds:
+        out["cost_label"] = "Snapshot cost"
+    else:
+        out["cost_label"] = ""
     return out
 
 

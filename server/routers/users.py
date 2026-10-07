@@ -75,6 +75,13 @@ def patch_user(username: str, body: UserPatchBody, user=Depends(require_user)):
         doc["enabled"] = bool(body.enabled)
         if not doc["enabled"]:
             store.delete_sessions_for(username)
+    if body.sales_reps is not None:
+        names = []
+        for name in body.sales_reps:
+            text = " ".join(str(name or "").split())
+            if text and text not in names:
+                names.append(text)
+        doc["sales_reps"] = names
     if body.password:
         doc = set_password(store, doc, body.password, clear_must_change=True)
         return public_user(doc, permissions_of(store, doc))

@@ -106,6 +106,8 @@ class ItemHoldingBody(BaseModel):
     fill_to: float | None = None
     clear_fill: bool = False
     lead_days: int | None = None
+    review_days: int | None = None
+    safety_stock: float | None = None
     max_days_hold: int | None = None
     clear_max_days: bool = False
     discontinued: bool | None = None
@@ -130,6 +132,7 @@ class UserPatchBody(BaseModel):
     role: str | None = None
     enabled: bool | None = None
     password: str | None = None
+    sales_reps: list[str] | None = None
 
 
 class RoleBody(BaseModel):

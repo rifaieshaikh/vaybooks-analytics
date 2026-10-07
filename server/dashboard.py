@@ -913,7 +913,8 @@ def filter_dashboard(payload, permissions):
         out["exceptions"] = exceptions
     else:
         out.pop("exceptions", None)
-    return out
+    from server.explain import filter_dashboard_explanations
+    return filter_dashboard_explanations(out, perms)
 
 
 def _overlay_live(store, permissions, payload, run):

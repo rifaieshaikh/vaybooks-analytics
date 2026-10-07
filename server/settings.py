@@ -12,13 +12,19 @@ load_dotenv(_ROOT / ".env", override=False)
 load_dotenv(_ROOT / ".env.example", override=False)
 
 SESSION_COOKIE = "vay_session"
-SOURCE_TYPES = ("sales", "receipt", "credit_note", "arr", "items", "stock", "payments", "party", "customer")
-EVENT_TYPES = ("sales", "receipt", "credit_note", "items", "payments")
+SOURCE_TYPES = (
+    "sales", "receipt", "credit_note", "arr", "items", "stock", "payments", "party", "customer",
+    "reservation", "incoming", "item_cost", "opening_cash", "payable",
+)
+EVENT_TYPES = (
+    "sales", "receipt", "credit_note", "items", "payments",
+    "reservation", "incoming", "item_cost", "opening_cash", "payable",
+)
 SNAPSHOT_TYPES = ("arr", "stock", "party", "customer")
-DATE_FIELDS = {"Date"}
+DATE_FIELDS = {"Date", "Need By", "Expected Date", "Due Date", "Effective Date", "Cost Date"}
 AMOUNT_FIELDS = {
     "Net Amount", "Amount", "Sales Amount", "SGST", "CGST", "IGST",
-    "Qty", "Balance", "Days", "P.Price", "Rate",
+    "Qty", "Balance", "Days", "P.Price", "Rate", "Cost",
 }
 NAME_FIELDS = ("Party Name", "Account Name", "Item Name")
 UK_SEP = "\x1f"
@@ -52,6 +58,11 @@ REQUIRED_FIELDS = {
     "payments": ["Date", "Account Name", "Amount"],
     "party": ["Account Name", "Group"],
     "customer": ["Account Name", "Group", "Balance"],
+    "reservation": ["Item Name", "Qty", "Need By"],
+    "incoming": ["Item Name", "Qty", "Expected Date", "Confirmed"],
+    "item_cost": ["Item Name", "Cost", "Effective Date"],
+    "opening_cash": ["Date", "Amount"],
+    "payable": ["Account Name", "Amount", "Due Date"],
 }
 
 # Stock columns. Empty is allowed, so they are not required and a file without them still imports.
@@ -68,6 +79,11 @@ DEFAULT_UNIQUE_KEYS = {
     "payments": ["Date", "Account Name", "Amount"],
     "party": ["Account Name"],
     "customer": ["Account Name"],
+    "reservation": ["Item Name", "Need By", "Qty"],
+    "incoming": ["Item Name", "Expected Date", "Qty"],
+    "item_cost": ["Item Name", "Effective Date"],
+    "opening_cash": ["Date"],
+    "payable": ["Account Name", "Due Date", "Amount"],
 }
 
 TYPE_LABELS = {
@@ -80,6 +96,11 @@ TYPE_LABELS = {
     "payments": "Payments",
     "party": "Parties",
     "customer": "Customers",
+    "reservation": "Reservations",
+    "incoming": "Incoming",
+    "item_cost": "Item cost",
+    "opening_cash": "Opening cash",
+    "payable": "Payables",
 }
 
 CLEANUP_TYPES = ("arr", "sales", "items", "payments", "receipt", "credit_note", "stock")

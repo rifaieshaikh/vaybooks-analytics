@@ -461,10 +461,23 @@ def _suggestions(promise, sources, allocs):
     return out
 
 
+def _receipt_coverage(customer_name, sources):
+    latest = ""
+    key = _key(customer_name)
+    for row in sources or []:
+        if row.get("source_type") != "receipt" or _key(row.get("name")) != key:
+            continue
+        day = row.get("date") or ""
+        if day > latest:
+            latest = day
+    return latest
+
+
 def _promise_view(promise, allocs, sources, store, as_of):
     allocated = _allocated_to(allocs, promise.get("id"))
     current = coverage_current(store, promise.get("customer_name"), promise.get("promised_on"), sources)
     state = payment_state(promise.get("amount"), allocated, promise.get("promised_on"), as_of, current)
+    receipt_through = _receipt_coverage(promise.get("customer_name"), sources)
     view = {
         "id": promise.get("id") or "",
         "customer_name": promise.get("customer_name") or "",
@@ -477,6 +490,11 @@ def _promise_view(promise, allocs, sources, store, as_of):
         "coverage_current": current,
         "allocations": [_allocation_view(row) for row in allocs if row.get("promise_id") == promise.get("id")],
         "suggestions": [] if state["remaining"] <= 0.009 else _suggestions(promise, sources, allocs),
+        "receipt_coverage_through": receipt_through,
+        "data_basis": {
+            "basis": "live",
+            "receipt_coverage_through": receipt_through,
+        },
         "created_by": promise.get("created_by") or "",
         "created_at": promise.get("created_at") or "",
         "updated_by": promise.get("updated_by") or "",

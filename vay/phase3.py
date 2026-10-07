@@ -107,9 +107,16 @@ def recovery_outcome(sales, name, assigned_date):
         if (row.get("name") or "").strip().lower() != key:
             continue
         when = str(row.get("date") or "")[:10]
-        if when and assigned and when > assigned and _num(row.get("amount")) > 0:
-            return {"bought_again": True, "label": "Bought again"}
-    return {"bought_again": False, "label": "No sale since assigned"}
+        amount = _num(row.get("amount"))
+        if when and assigned and when > assigned and amount > 0:
+            return {
+                "bought_again": True,
+                "label": "Bought again",
+                "amount": amount,
+                "evidence_date": when,
+                "pending": False,
+            }
+    return {"bought_again": False, "label": "No sale since assigned", "amount": None, "evidence_date": "", "pending": False}
 
 
 def purchase_outcome(on_hand, proposed_qty, slow, later_file):

@@ -221,6 +221,8 @@ function HoldForm({ detail, canEdit, onSaved }) {
   const [minHold, setMinHold] = useState(String(detail.min_hold ?? 0));
   const [fillTo, setFillTo] = useState(holding.fill_to != null ? String(holding.fill_to) : "");
   const [lead, setLead] = useState(String(detail.lead_days ?? 0));
+  const [reviewDays, setReviewDays] = useState(holding.review_days != null ? String(holding.review_days) : "");
+  const [safety, setSafety] = useState(holding.safety_stock != null ? String(holding.safety_stock) : "");
   const [maxDays, setMaxDays] = useState(String(detail.max_days_hold ?? 60));
   const [disc, setDisc] = useState(!!detail.discontinued);
   const [saving, setSaving] = useState(false);
@@ -230,6 +232,8 @@ function HoldForm({ detail, canEdit, onSaved }) {
     setMinHold(String(detail.min_hold ?? 0));
     setFillTo(holding.fill_to != null ? String(holding.fill_to) : "");
     setLead(String(detail.lead_days ?? 0));
+    setReviewDays(holding.review_days != null ? String(holding.review_days) : "");
+    setSafety(holding.safety_stock != null ? String(holding.safety_stock) : "");
     setMaxDays(String(detail.max_days_hold ?? 60));
     setDisc(!!detail.discontinued);
     setErr("");
@@ -241,6 +245,8 @@ function HoldForm({ detail, canEdit, onSaved }) {
         <div><span className="muted">Min holding</span><strong>{qty(detail.min_hold)}</strong></div>
         <div><span className="muted">Fill to</span><strong>{holding.fill_to != null ? qty(holding.fill_to) : "Auto (" + qty(detail.fill_to) + ")"}</strong></div>
         <div><span className="muted">Days to arrive</span><strong>{detail.lead_days || 0}</strong></div>
+        <div><span className="muted">Review days</span><strong>{holding.review_days != null ? holding.review_days : "—"}</strong></div>
+        <div><span className="muted">Safety stock</span><strong>{holding.safety_stock != null ? qty(holding.safety_stock) : "—"}</strong></div>
         <div>
           <span className="muted">Max days hold</span>
           <strong>{detail.max_days_hold ?? 60}</strong>
@@ -274,6 +280,22 @@ function HoldForm({ detail, canEdit, onSaved }) {
       max_days_hold: Math.round(maxN),
       discontinued: disc,
     };
+    if (reviewDays !== "") {
+      const reviewN = Number(reviewDays);
+      if (!Number.isFinite(reviewN) || reviewN < 0) {
+        setErr("Review days must be 0 or more, or blank.");
+        return;
+      }
+      body.review_days = Math.round(reviewN);
+    }
+    if (safety !== "") {
+      const safetyN = Number(safety);
+      if (!Number.isFinite(safetyN) || safetyN < 0) {
+        setErr("Safety stock must be 0 or more, or blank.");
+        return;
+      }
+      body.safety_stock = safetyN;
+    }
     if (fillTo === "" || fillTo == null) {
       body.clear_fill = true;
     } else {
@@ -325,6 +347,16 @@ function HoldForm({ detail, canEdit, onSaved }) {
         Days to arrive
         <span className="muted hold-hint">Supplier lead time. Moves the “buy by” date earlier.</span>
         <input type="number" min="0" step="1" value={lead} disabled={saving} onChange={(e) => setLead(e.target.value)} />
+      </label>
+      <label>
+        Review days
+        <span className="muted hold-hint">Blank keeps the fill-to quantity. A number switches this item to a demand target.</span>
+        <input type="number" min="0" step="1" value={reviewDays} disabled={saving} onChange={(e) => setReviewDays(e.target.value)} />
+      </label>
+      <label>
+        Safety stock
+        <span className="muted hold-hint">Extra units added to the demand target.</span>
+        <input type="number" min="0" step="any" value={safety} disabled={saving} onChange={(e) => setSafety(e.target.value)} />
       </label>
       <label>
         Max days hold
@@ -596,7 +628,31 @@ function Profile({ detail, runId, onBack, backLabel, canEdit, onSaved }) {
           <span className="muted">Buy by</span>
           <strong>{detail.buy_qty ? (detail.buy_by_label || "Now") : "—"}</strong>
         </div>
+        <div className="card buy-tile">
+          <span className="muted">Reserved</span>
+          <strong>{detail.reserved == null ? "Not in this file" : qty(detail.reserved)}</strong>
+        </div>
+        <div className="card buy-tile">
+          <span className="muted">Incoming on time</span>
+          <strong>{detail.incoming_on_time == null ? "Not in this file" : qty(detail.incoming_on_time)}</strong>
+        </div>
+        <div className="card buy-tile">
+          <span className="muted">Incoming late</span>
+          <strong>{detail.incoming_late == null ? "Not in this file" : qty(detail.incoming_late)}</strong>
+        </div>
+        <div className="card buy-tile">
+          <span className="muted">Position</span>
+          <strong>{detail.position == null ? "Not in this file" : qty(detail.position)}</strong>
+        </div>
       </div>
+      {detail.demand_label ? <p className="muted">{detail.demand_label}{detail.demand_target != null ? " · Target " + qty(detail.demand_target) : ""}</p> : null}
+      {detail.past_check ? (
+        <p className="muted">
+          {detail.past_check.label}
+          {detail.past_check.buy_qty != null ? " · Earlier buy " + qty(detail.past_check.buy_qty) : ""}
+          {detail.past_check.exceeded ? " · Later sales exceeded stock on hand" : ""}
+        </p>
+      ) : null}
       {insight.action || insight.next_move ? (
         <p className="muted next-move">{insight.action || insight.next_move}</p>
       ) : null}
