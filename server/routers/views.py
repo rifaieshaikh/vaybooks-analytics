@@ -216,10 +216,14 @@ def api_customer_pdf(uk: str, request: Request, user=Depends(require_user)):
     if not detail:
         raise HTTPException(404, "Not found")
     view = _normalize_pdf_view(params.get("view"))
+    if view == "reminder":
+        from server.collection import reminder_context
+        detail = dict(detail)
+        detail["collection_reminder"] = reminder_context(store, detail.get("name") or "")
     data = customer_pdf(detail, view=view)
     as_of = (detail.get("as_of") or "").replace("-", "")
     raw_name = "".join(ch if ch.isalnum() else "_" for ch in (detail.get("name") or "customer"))
-    kind = "statement" if view == "customer" else "brief"
+    kind = {"customer": "statement", "reminder": "reminder"}.get(view, "brief")
     filename = "%s_%s_%s.pdf" % (raw_name.strip("_") or "customer", kind, as_of or "today")
     return Response(content=data, media_type="application/pdf", headers={"Content-Disposition": "attachment; filename=%s" % filename})
 

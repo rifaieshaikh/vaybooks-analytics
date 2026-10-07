@@ -16,8 +16,14 @@ def _num(value):
 
 
 def round_pack(qty, pack_size, minimum=0):
-    """Round a buy quantity up to the pack size, after applying the minimum."""
-    amount = max(_num(qty), _num(minimum))
+    """Round a positive buy quantity up to the pack size, after the minimum.
+
+    A zero requirement stays zero. The order minimum does not create a purchase.
+    """
+    amount = _num(qty)
+    if amount <= 0:
+        return 0.0
+    amount = max(amount, _num(minimum))
     pack = _num(pack_size)
     if pack <= 0:
         return round(amount, 2)
@@ -25,25 +31,53 @@ def round_pack(qty, pack_size, minimum=0):
     return round(units * pack, 2)
 
 
-def apply_budget(lines, budget):
-    """Keep lines in order until the next one would pass the budget.
+def _cost_missing(line):
+    return line.get("unit_cost") in ("", None)
 
-    A missing budget keeps every line. The first line that does not fit is
-    excluded, and nothing after it is kept.
+
+def apply_budget(lines, budget):
+    """Keep costed lines in order until the next one would pass the budget.
+
+    A missing purchase cost is not treated as zero. With a budget, that line is
+    left out and later costed lines can still be kept. After a costed line does
+    not fit, every following line is deferred. A missing budget keeps every line
+    and labels a missing cost as uncosted.
     """
     rows = list(lines or [])
     if budget in ("", None):
-        return rows, None
+        shown = []
+        for line in rows:
+            row = dict(line)
+            if _cost_missing(line):
+                row["uncosted"] = True
+                row["line_cost"] = None
+                row["cost_label"] = "Uncosted"
+            else:
+                row["uncosted"] = False
+                row["line_cost"] = round(_num(line.get("qty")) * _num(line.get("unit_cost")), 2)
+                row["cost_label"] = line.get("cost_label") or "Snapshot cost"
+            shown.append(row)
+        return shown, None, []
     limit = _num(budget)
     kept = []
+    deferred = []
     spent = 0.0
+    blocked = False
     for line in rows:
+        if blocked:
+            deferred.append(dict(line, defer_reason="Would pass the budget"))
+            continue
+        if _cost_missing(line):
+            deferred.append(dict(line, uncosted=True, line_cost=None, defer_reason="Missing purchase cost"))
+            continue
         cost = round(_num(line.get("qty")) * _num(line.get("unit_cost")), 2)
         if spent + cost > limit + 1e-9:
-            break
-        kept.append(dict(line, line_cost=cost))
+            blocked = True
+            deferred.append(dict(line, line_cost=cost, defer_reason="Would pass the budget"))
+            continue
+        kept.append(dict(line, uncosted=False, line_cost=cost, cost_label=line.get("cost_label") or "Snapshot cost"))
         spent = round(spent + cost, 2)
-    return kept, spent
+    return kept, spent, deferred
 
 
 def received_since(receipts, name, assigned_date, cap):

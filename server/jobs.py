@@ -14,6 +14,7 @@ from server.pdf_export import catalog_entries, catalog_rows, dated_folder, expor
 from server.run_views import build_views_snapshot, invalidate_views_cache
 from server.serialize import serialize_result
 from server.settings import PACK_PHASES, PACK_TYPES
+from server.store import now_utc
 from server.tables import tables_from_store
 
 log = logging.getLogger("vay.jobs")
@@ -531,6 +532,7 @@ def _run_job(store, run_id):
                     "mapper_versions": up.get("mapper_versions") or {},
                     "effective_date": up.get("effective_date") or "",
                     "effective_dates": up.get("effective_dates") or {},
+                    "finished_at": str(up.get("finished_at") or up.get("created_at") or ""),
                 })
             policy_public = get_org_policy(store)
             manifest = {
@@ -569,6 +571,7 @@ def _run_job(store, run_id):
                 )
             store.update_run(run_id, {
                 "status": "succeeded" if usable else "failed",
+                "finished_at": now_utc(),
                 "message": "" if usable and not failed_steps else (summary or "Could not create reports."),
                 "dashboard": dashboard_doc,
                 "xlsx_id": xlsx_id,

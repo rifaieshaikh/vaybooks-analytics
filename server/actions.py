@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timedelta
 
+from server.collection import attach_collection_summaries
 from vay.dates import clean_text, number_, parse_date
 from vay.phase3 import data_fix_outcome, purchase_outcome, received_since, recovery_outcome
 
@@ -200,13 +201,34 @@ def attach_outcomes(store, actions, quality_messages=None, report_date=None):
         else:
             row["outcome"] = {"label": ""}
         out.append(row)
-    return out
+    return attach_collection_summaries(store, out)
+
+
+def _purchase_choice(stock_rows):
+    """First item Item 360 says to buy: earliest buy-by, then larger quantity, then name."""
+    choices = []
+    for row in stock_rows or []:
+        try:
+            buy = float(row.get("buy_qty") or 0)
+        except (TypeError, ValueError):
+            buy = 0.0
+        if buy <= 0.009:
+            continue
+        choices.append(row)
+    if not choices:
+        return None
+
+    def key(row):
+        when = row.get("buy_by") or "9999-99-99"
+        return (when, -float(row.get("buy_qty") or 0), (row.get("name") or "").lower())
+
+    choices.sort(key=key)
+    return choices[0]
 
 
 def suggestions(bundle, thresholds=None):
     """Proposed actions from the Phase 2 lists. Nothing is saved until the user confirms."""
     thresholds = thresholds or {}
-    cover_limit = thresholds.get("cover_days")
     overdue_limit = thresholds.get("overdue_amount")
     change = (bundle or {}).get("sales_change") or {}
     customers = change.get("customers") or []
@@ -217,15 +239,7 @@ def suggestions(bundle, thresholds=None):
         if float(first_collection.get("overdue_30") or 0) < float(overdue_limit):
             first_collection = None
     stock_rows = ((bundle or {}).get("stock") or {}).get("rows") or []
-    short = None
-    limit = float(cover_limit) if cover_limit not in ("", None) else 30.0
-    for row in stock_rows:
-        days = row.get("cover_days")
-        if days is None:
-            continue
-        if float(days) <= limit:
-            short = row
-            break
+    purchase = _purchase_choice(stock_rows)
     movement = {row.get("name"): row for row in ((bundle or {}).get("customer_movement") or {}).get("rows") or []}
     quality = ((bundle or {}).get("quality") or {}).get("rows") or []
     ideas = []
@@ -249,14 +263,14 @@ def suggestions(bundle, thresholds=None):
             "amount": first_collection.get("balance"),
             "reason": "First collection",
         })
-    if short:
+    if purchase:
         ideas.append({
             "action_type": "purchase",
             "subject_kind": "item",
-            "subject_name": short.get("name") or "",
-            "proposal": "Reorder %s" % (short.get("name") or ""),
-            "amount": short.get("on_hand"),
-            "reason": "Short stock cover",
+            "subject_name": purchase.get("name") or "",
+            "proposal": "Reorder %s" % (purchase.get("name") or ""),
+            "amount": purchase.get("buy_qty"),
+            "reason": purchase.get("buy_reason") or "Purchase",
         })
     if quality:
         row = quality[0]

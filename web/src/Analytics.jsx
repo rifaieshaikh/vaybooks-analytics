@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { api } from "./api";
+import CollectionFollowUp from "./CollectionFollowUp";
 import { hashSet, money } from "./format";
 import SalesCompare, { formatQty, resultLabel } from "./SalesCompare";
 import { can } from "./theme";
@@ -151,14 +152,19 @@ export default function AnalyticsPage({ section, run, user }) {
         }) : null} />
       ) : null}
       {section === "collection" ? (
-        <Collection data={data.collection} matches={matches} onAssign={manage ? (row) => setDraft({
-          action_type: "collection",
-          subject_kind: "customer",
-          subject_name: row.name,
-          proposal: "Collect from " + row.name,
-          amount: row.balance,
-          report_date: run?.report_date || data.report_date || "",
-        }) : null} />
+        <Collection
+          data={data.collection}
+          matches={matches}
+          user={user}
+          onAssign={manage ? (row) => setDraft({
+            action_type: "collection",
+            subject_kind: "customer",
+            subject_name: row.name,
+            proposal: "Collect from " + row.name,
+            amount: row.balance,
+            report_date: run?.report_date || data.report_date || "",
+          }) : null}
+        />
       ) : null}
       {section === "stock" ? (
         <StockDecisions data={data.stock} matches={matches} onAssign={manage ? (row) => setDraft({
@@ -365,26 +371,93 @@ function Movement({ data, matches, onAssign }) {
   );
 }
 
-function Collection({ data, matches, onAssign }) {
+function Collection({ data, matches, onAssign, user }) {
+  const [queues, setQueues] = useState(null);
+  const [follow, setFollow] = useState("");
+  const manage = can(user, "actions.manage");
+  useEffect(() => {
+    api.collectionQueues().then(setQueues).catch(() => setQueues(null));
+  }, [follow]);
   if (data?.status === "unavailable") return <p className="muted">{data.reason}</p>;
   const rows = (data?.rows || []).filter((row) => matches(row.name) || matches(row.status));
+  const due = queues?.due_follow_ups || [];
+  const missed = queues?.missed_promises || [];
+  const pending = queues?.pending_refresh || [];
   return (
-    <SectionTable
-      title="Who to collect from"
-      headers={["Customer", "Status", "Balance", "Overdue 30+", "Invoices"]}
-      rows={rows}
-      onAssign={onAssign}
-      cells={(row) => [
-        row.name,
-        row.status,
-        money(row.balance),
-        money(row.overdue_30),
-        row.invoice_detail === "available" || row.invoice_detail === "estimated"
-          ? (row.invoices || []).map((inv) => inv.invoice + " " + money(inv.remaining)).join(", ")
-            + (row.invoice_detail === "estimated" ? " (estimated)" : "")
-          : "Invoice detail unavailable",
-      ]}
-    />
+    <div className="stack">
+      {queues ? (
+        <div className="analytics-columns">
+          <section>
+            <h3>Due follow-ups</h3>
+            {due.length ? due.map((row) => (
+              <article className="analytics-item" key={row.id}>
+                <div>
+                  <p className="analytics-title">{row.customer_name}</p>
+                  <div className="analytics-meta">
+                    <span>Due {row.next_follow_up}</span>
+                    {row.next_step ? <span>{row.next_step}</span> : null}
+                  </div>
+                </div>
+                <button type="button" className="secondary" onClick={() => setFollow(row.customer_name)}>Open</button>
+              </article>
+            )) : <p className="muted">No follow-ups due.</p>}
+          </section>
+          <section>
+            <h3>Missed promises</h3>
+            {missed.length ? missed.map((row) => (
+              <article className="analytics-item" key={row.id}>
+                <div>
+                  <p className="analytics-title">{row.customer_name}</p>
+                  <div className="analytics-meta">
+                    <span>{money(row.remaining)} left</span>
+                    <span>Promised {row.promised_on}</span>
+                  </div>
+                </div>
+                <button type="button" className="secondary" onClick={() => setFollow(row.customer_name)}>Open</button>
+              </article>
+            )) : <p className="muted">No missed promises.</p>}
+            {pending.length ? (
+              <p className="muted">{pending.length} promise{pending.length === 1 ? "" : "s"} waiting on a receipt refresh before they can be marked missed.</p>
+            ) : null}
+          </section>
+        </div>
+      ) : null}
+      <SectionTable
+        title="Who to collect from"
+        headers={["Customer", "Status", "Balance", "Overdue 30+", "Invoices"]}
+        rows={rows}
+        onAssign={onAssign}
+        onFollow={(row) => setFollow(row.name)}
+        cells={(row) => [
+          row.name,
+          row.status,
+          money(row.balance),
+          money(row.overdue_30),
+          row.invoice_detail === "available" || row.invoice_detail === "estimated"
+            ? (row.invoices || []).map((inv) => inv.invoice + " " + money(inv.remaining)).join(", ")
+              + (row.invoice_detail === "estimated" ? " (estimated)" : "")
+            : "Invoice detail unavailable",
+        ]}
+      />
+      {follow ? createPortal(
+        <div className="modal-backdrop" onClick={() => setFollow("")}>
+          <div className="modal assign-modal follow-modal" role="dialog" aria-modal="true" aria-labelledby="follow-title" onClick={(e) => e.stopPropagation()}>
+            <div className="card-head">
+              <h3 id="follow-title">{follow}</h3>
+              <button type="button" className="ghost" onClick={() => setFollow("")}>Close</button>
+            </div>
+            <CollectionFollowUp
+              customerName={follow}
+              invoices={(rows.find((row) => row.name === follow) || {}).invoices}
+              canManage={manage}
+              user={user}
+              onReminder={() => api.customerPdf(follow, follow, { view: "reminder" })}
+            />
+          </div>
+        </div>,
+        document.body,
+      ) : null}
+    </div>
   );
 }
 
@@ -400,7 +473,7 @@ function StockDecisions({ data, matches, onAssign }) {
       </div>
       <SectionTable
         title="Items"
-        headers={["Item", "On hand", "Qty 30 days", "Cover", "Slow value"]}
+        headers={["Item", "On hand", "Qty 30 days", "Cover", "To buy", "Slow value"]}
         rows={rows}
         onAssign={onAssign}
         cells={(row) => [
@@ -408,6 +481,7 @@ function StockDecisions({ data, matches, onAssign }) {
           row.on_hand,
           row.qty_30,
           row.cover_days != null ? row.cover_days : (row.cover_label || "—"),
+          row.buy_qty ? units(row.buy_qty) : "—",
           row.slow_value == null ? (row.slow ? "Missing cost" : "—") : money(row.slow_value),
         ]}
       />
@@ -430,15 +504,15 @@ function Quality({ data, matches, onAssign }) {
   );
 }
 
-function SectionTable({ title, headers, rows, cells, drillable = true, onAssign, numFrom = null }) {
-  const cols = headers.length + (onAssign ? 1 : 0);
+function SectionTable({ title, headers, rows, cells, drillable = true, onAssign, onFollow, numFrom = null }) {
+  const cols = headers.length + (onAssign || onFollow ? 1 : 0);
   return (
     <div className="card table-card list-panel analytics-table">
       <div className="table-card-head"><h3>{title}</h3></div>
       <div className="table-wrap">
         <table className="dense list-table compact">
           <thead>
-            <tr>{headers.map((h, idx) => <th key={h} className={numFrom != null && idx >= numFrom && h !== "Result" && h !== "Qty" && h !== "Amount" ? "num" : ""}>{h}</th>)}{onAssign ? <th className="num">Assign</th> : null}</tr>
+            <tr>{headers.map((h, idx) => <th key={h} className={numFrom != null && idx >= numFrom && h !== "Result" && h !== "Qty" && h !== "Amount" ? "num" : ""}>{h}</th>)}{onAssign || onFollow ? <th className="num">{onFollow ? "Follow up" : "Assign"}</th> : null}</tr>
           </thead>
           <tbody>
             {rows.length ? rows.map((row, i) => (
@@ -448,9 +522,14 @@ function SectionTable({ title, headers, rows, cells, drillable = true, onAssign,
                 onClick={drillable ? () => drill(row) : undefined}
               >
                 {cells(row).map((value, idx) => <td key={idx} className={numFrom != null && idx >= numFrom && headers[idx] !== "Result" && headers[idx] !== "Qty" && headers[idx] !== "Amount" ? "num" : ""}>{value}</td>)}
-                {onAssign ? (
+                {onAssign || onFollow ? (
                   <td className="num">
-                    <button type="button" className="secondary analytics-assign" onClick={(e) => { e.stopPropagation(); onAssign(row); }}>Assign</button>
+                    {onFollow ? (
+                      <button type="button" className="secondary analytics-assign" onClick={(e) => { e.stopPropagation(); onFollow(row); }}>Follow up</button>
+                    ) : null}
+                    {onAssign ? (
+                      <button type="button" className="secondary analytics-assign" onClick={(e) => { e.stopPropagation(); onAssign(row); }}>Assign</button>
+                    ) : null}
                   </td>
                 ) : null}
               </tr>
@@ -577,6 +656,14 @@ function WeeklyReview({ run, user }) {
                   <span>{row.owner}</span>
                   <span>Due {row.due_date}</span>
                   {row.outcome?.label ? <span>{row.outcome.label}</span> : null}
+                  {row.collection?.label ? (
+                    <span>
+                      {row.collection.label}
+                      {row.collection.promise_count && row.collection.label !== "Payment confirmation is pending a refresh."
+                        ? " " + money(row.collection.remaining)
+                        : ""}
+                    </span>
+                  ) : null}
                 </div>
               </div>
               {manage && row.status === "open" ? (
@@ -592,9 +679,23 @@ function WeeklyReview({ run, user }) {
   );
 }
 
+function units(n) {
+  const value = Number(n);
+  if (!Number.isFinite(value)) return "—";
+  return value.toLocaleString(undefined, { maximumFractionDigits: 2 });
+}
+
+function applyReorder(payload, setData, setOrder, setHeld, setBudget) {
+  setData(payload);
+  setOrder(payload.order || payload.lines || []);
+  setHeld(payload.held || []);
+  setBudget(payload.budget == null ? "" : String(payload.budget));
+}
+
 function ReorderPage({ run, user }) {
   const [data, setData] = useState(null);
-  const [lines, setLines] = useState([]);
+  const [order, setOrder] = useState([]);
+  const [held, setHeld] = useState([]);
   const [budget, setBudget] = useState("");
   const [owner, setOwner] = useState(user?.username || "");
   const [err, setErr] = useState("");
@@ -602,37 +703,51 @@ function ReorderPage({ run, user }) {
   const manage = can(user, "actions.manage");
   useEffect(() => {
     api.reorder(run?.id ? { run: run.id } : {})
-      .then((payload) => {
-        setData(payload);
-        setLines(payload.lines || []);
-        setBudget(payload.budget == null ? "" : String(payload.budget));
-      })
+      .then((payload) => applyReorder(payload, setData, setOrder, setHeld, setBudget))
       .catch((e) => setErr(e.message || "Could not load"));
   }, [run?.id]);
   function patch(index, key, value) {
-    setLines((prev) => prev.map((row, i) => (i === index ? { ...row, [key]: value } : row)));
+    setOrder((prev) => prev.map((row, i) => {
+      if (i !== index) return row;
+      const next = { ...row, [key]: value };
+      if (key === "qty") next.manual = value !== "";
+      return next;
+    }));
+  }
+  function move(index, dir) {
+    setOrder((prev) => {
+      const next = prev.slice();
+      const target = index + dir;
+      if (target < 0 || target >= next.length) return prev;
+      const swap = next[index];
+      next[index] = next[target];
+      next[target] = swap;
+      return next;
+    });
   }
   async function save(assign) {
     setErr("");
     setMsg("");
     try {
-      const out = await api.saveReorder({
+      await api.saveReorder({
         budget: budget === "" ? null : Number(budget),
         assign,
         owner,
         report_date: data?.report_date || run?.report_date || "",
-        lines: lines.map((row) => ({
+        lines: order.map((row) => ({
           name: row.name,
-          qty: Number(row.qty),
+          qty: row.qty === "" ? null : Number(row.qty),
+          manual: !!row.manual,
+          basis_qty: row.suggested_qty,
           pack_size: Number(row.pack_size || 0),
           minimum: Number(row.minimum || 0),
           lead_days: Number(row.lead_days || 0),
           supplier: row.supplier || "",
-          unit_cost: row.unit_cost || 0,
+          unit_cost: row.unit_cost == null ? null : row.unit_cost,
         })),
       });
-      setLines(out.lines || []);
-      setData((prev) => ({ ...(prev || {}), spent: out.spent, stopped: out.stopped }));
+      const payload = await api.reorder(run?.id ? { run: run.id } : {});
+      applyReorder(payload, setData, setOrder, setHeld, setBudget);
       setMsg(assign ? "Reorder saved and assigned. This is not a purchase order." : "Reorder saved.");
     } catch (e) {
       setErr(e.message || "Could not save");
@@ -661,33 +776,72 @@ function ReorderPage({ run, user }) {
           <span className="page-stat">Spent {money(data.spent)} of {money(Number(budget))}</span>
         ) : null}
       </div>
+      <p className="muted">
+        {data.order_rule || "Earliest buy-by, then larger quantity, then name."}
+        {data.stock_date ? " Stock snapshot " + data.stock_date + "." : ""}
+        {data.demand_label ? " " + data.demand_label + "." : ""}
+      </p>
       <div className="card table-card list-panel">
         <div className="table-wrap">
           <table className="dense list-table compact analytics-edit">
             <thead>
               <tr>
-                <th>Item</th><th className="num">Cover</th><th>Qty</th><th>Pack</th><th>Minimum</th><th>Lead days</th><th>Supplier</th><th className="num">Snapshot cost</th>
+                <th>Item</th>
+                <th>Pace</th>
+                <th className="num">Target</th>
+                <th>Buy by</th>
+                <th>Lead days</th>
+                <th>Reason</th>
+                <th className="num">Suggested</th>
+                <th>Qty</th>
+                <th>Pack</th>
+                <th>Minimum</th>
+                <th>Supplier</th>
+                <th className="num">Cost</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
-              {lines.length ? lines.map((row, i) => (
+              {order.length ? order.map((row, i) => (
                 <tr key={row.name}>
-                  <td>{row.name}</td>
-                  <td className="num">{row.cover_days}</td>
-                  <td><input type="number" value={row.qty} onChange={(e) => patch(i, "qty", e.target.value)} /></td>
-                  <td><input type="number" value={row.pack_size || ""} onChange={(e) => patch(i, "pack_size", e.target.value)} /></td>
-                  <td><input type="number" value={row.minimum || ""} onChange={(e) => patch(i, "minimum", e.target.value)} /></td>
-                  <td><input type="number" value={row.lead_days || ""} onChange={(e) => patch(i, "lead_days", e.target.value)} /></td>
+                  <td>
+                    {row.name}
+                    {row.manual ? <div className="muted">Edited</div> : null}
+                    {row.needs_review ? <div className="muted">{row.review_reason || "Review this quantity."}</div> : null}
+                    {row.pack_reason ? <div className="muted">{row.pack_reason} {row.pack_added ? "+" + units(row.pack_added) : ""}</div> : null}
+                    {!row.included && row.defer_reason ? <div className="muted">{row.defer_reason}</div> : null}
+                  </td>
+                  <td>{row.pace ? units(row.pace) + "/day" : "No recent demand"}{row.pace_days ? <div className="muted">{row.pace_days} days</div> : null}</td>
+                  <td className="num">{units(row.fill_to)}</td>
+                  <td>{row.buy_by_label || row.buy_by || "—"}</td>
+                  <td><input type="number" min="0" value={row.lead_days || ""} onChange={(e) => patch(i, "lead_days", e.target.value)} /></td>
+                  <td>{row.reason || "—"}</td>
+                  <td className="num">{units(row.suggested_qty)}</td>
+                  <td><input type="number" min="0" value={row.qty} onChange={(e) => patch(i, "qty", e.target.value)} /></td>
+                  <td><input type="number" min="0" value={row.pack_size || ""} onChange={(e) => patch(i, "pack_size", e.target.value)} /></td>
+                  <td><input type="number" min="0" value={row.minimum || ""} onChange={(e) => patch(i, "minimum", e.target.value)} /></td>
                   <td className="wide"><input value={row.supplier || ""} onChange={(e) => patch(i, "supplier", e.target.value)} /></td>
-                  <td className="num">{row.unit_cost == null ? "—" : money(row.unit_cost)}</td>
+                  <td className="num">{row.unit_cost == null ? "Uncosted" : money(row.unit_cost)}</td>
+                  <td>
+                    <button type="button" className="ghost" onClick={() => move(i, -1)} disabled={i === 0}>Up</button>
+                    <button type="button" className="ghost" onClick={() => move(i, 1)} disabled={i === order.length - 1}>Down</button>
+                  </td>
                 </tr>
               )) : (
-                <tr><td className="muted" colSpan={8}>No short-cover items for this report.</td></tr>
+                <tr><td className="muted" colSpan={13}>No purchase requirement for this report.</td></tr>
               )}
             </tbody>
           </table>
         </div>
       </div>
+      {held.length ? (
+        <div className="card">
+          <h3>Not in this proposal</h3>
+          {held.map((row) => (
+            <p key={row.name}>{row.name}: {row.defer_reason || row.reason || "No purchase needed."}{row.needs_review ? " Review this quantity." : ""}</p>
+          ))}
+        </div>
+      ) : null}
       {data.stopped ? <p className="muted">Later lines were left out because they would pass the budget.</p> : null}
       {err ? <p className="err">{err}</p> : null}
       {msg ? <p className="ok analytics-flash">{msg}</p> : null}

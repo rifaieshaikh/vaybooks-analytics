@@ -4,18 +4,31 @@ from server.settings import SOURCE_TYPES
 
 SKIP_DESTS = frozenset({"", "__skip__", "(skip)", "skip"})
 
-# Source headers that are not the AppSheet names. Destinations stay canonical.
-SALES_HEADER_PRESET = {
+# Only shipped preset. A pilot preset is added when that workbook is in
+# docs/phase0/samples/<pilot>/ with preset.json. Checklist, remembered import
+# mode, header check, and refresh status do not wait on those files.
+PLAIN_SALES_SHAPE = {
     "id": "plain_sales",
-    "label": "Plain sales headers",
-    "type": "sales",
-    "column_map": {
+    "source_columns": ["Invoice Date", "Customer", "Rep", "Amount"],
+    "date_column": "Invoice Date",
+    "snapshot_date": False,
+    "canonical": {
         "Invoice Date": "Date",
         "Customer": "Party Name",
         "Rep": "Sales Rep",
         "Amount": "Net Amount",
     },
     "unique_key": ["Date", "Party Name", "Sales Rep", "Net Amount"],
+}
+
+# Source headers that are not the AppSheet names. Destinations stay canonical.
+SALES_HEADER_PRESET = {
+    "id": PLAIN_SALES_SHAPE["id"],
+    "label": "Plain sales headers",
+    "type": "sales",
+    "column_map": dict(PLAIN_SALES_SHAPE["canonical"]),
+    "unique_key": list(PLAIN_SALES_SHAPE["unique_key"]),
+    "shape": PLAIN_SALES_SHAPE,
 }
 
 PRESETS = (SALES_HEADER_PRESET,)

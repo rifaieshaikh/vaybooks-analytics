@@ -54,7 +54,15 @@ function localReady(sheet) {
 function mappingReady(sheet) {
   if (!sheet || sheet.skip || !sheet.type) return false;
   if (sheet.allowed === false) return false;
+  if (sheet.header_changes?.changed && !sheet.mapping_confirmed) return false;
   return sheetMissing(sheet).length === 0;
+}
+
+function formatWhen(value) {
+  if (!value) return "";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return String(value);
+  return parsed.toLocaleString();
 }
 
 function resultLine(name, info) {
@@ -74,25 +82,104 @@ function resultLine(name, info) {
   return `${friendlyType(name)}: ${bits.join(", ") || "saved"}`;
 }
 
-function OnboardingPreview({ active }) {
+function OnboardingPreview({ active, reportDate }) {
   const [data, setData] = useState(null);
+  const [salesTotal, setSalesTotal] = useState("");
+  const [outstandingTotal, setOutstandingTotal] = useState("");
+  const [compareErr, setCompareErr] = useState("");
+
+  function load(extra) {
+    const params = { report_date: reportDate || "" };
+    if (extra) Object.assign(params, extra);
+    setCompareErr("");
+    return api.onboarding(params).then((payload) => {
+      setData(payload);
+      const controls = payload?.controls || {};
+      if (!extra) {
+        if (controls.sales?.entered != null) setSalesTotal(String(controls.sales.entered));
+        if (controls.outstanding?.entered != null) setOutstandingTotal(String(controls.outstanding.entered));
+      }
+      return payload;
+    }).catch((err) => setCompareErr(err.message || "Could not compare totals"));
+  }
+
   useEffect(() => {
     if (!active) return undefined;
     let cancelled = false;
-    api.onboarding().then((payload) => { if (!cancelled) setData(payload); }).catch(() => {});
+    load().then(() => { if (cancelled) setData(null); });
     return () => { cancelled = true; };
-  }, [active]);
+  }, [active, reportDate]);
+
   if (!active || !data) return null;
   const blocked = (data.metrics || []).filter((row) => row.status !== "eligible");
+  const sources = data.sources || [];
   return (
     <div className="card" style={{ marginTop: 12 }}>
       <h4>What this import can calculate</h4>
       {(data.missing_files || []).length ? (
         <p className="muted">Still missing: {(data.missing_files || []).map((row) => row.label).join(", ")}</p>
       ) : <p className="ok">Sales, receipts, outstanding, item sales, and stock are present.</p>}
+      {sources.map((row) => (
+        <p key={row.type} className={row.present && row.date_ok ? "muted" : "warn"}>
+          {row.label}: {(row.required_fields || []).join(", ") || "No required fields"}. {row.date_note}
+        </p>
+      ))}
+      <label>Agreed sales total
+        <input value={salesTotal} onChange={(e) => setSalesTotal(e.target.value)} inputMode="decimal" />
+      </label>
+      <label>Agreed outstanding total
+        <input value={outstandingTotal} onChange={(e) => setOutstandingTotal(e.target.value)} inputMode="decimal" />
+      </label>
+      <p>
+        <button type="button" className="secondary" onClick={() => load({
+          control_sales: salesTotal,
+          control_outstanding: outstandingTotal,
+        })}
+        >Compare totals</button>
+      </p>
+      {compareErr ? <p className="err">{compareErr}</p> : null}
+      {(data.exceptions || []).map((row) => (
+        <p key={row.id} className="warn">{row.message}</p>
+      ))}
       {blocked.length ? blocked.slice(0, 8).map((row) => (
         <p key={row.id} className="muted">{row.id}: {row.reason || "Unavailable"}. {row.fix}</p>
       )) : <p className="ok">Headline metrics are eligible for {data.report_date}.</p>}
+    </div>
+  );
+}
+
+function RefreshStatus({ runId, active }) {
+  const [data, setData] = useState(null);
+  useEffect(() => {
+    if (!active) return undefined;
+    let cancelled = false;
+    api.refresh(runId || "").then((payload) => { if (!cancelled) setData(payload); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [active, runId]);
+  if (!active || !data || (!data.report_finished_at && !(data.missing || []).length)) return null;
+  const used = (data.types_used || []).join(", ");
+  return (
+    <div style={{ marginTop: 12 }}>
+      {data.report_finished_at ? (
+        <p className="muted">Report finished {formatWhen(data.report_finished_at)}.</p>
+      ) : null}
+      {data.current ? (
+        <p className="ok">This report includes the batches for {used || "the sheets it used"}.</p>
+      ) : (
+        <div>
+          <p className="warn">Later imports are not in this report.</p>
+          {(data.missing || []).map((row) => (
+            <p key={row.id} className="muted">
+              {row.filename || "Import"} ({(row.types || []).join(", ")}) finished {formatWhen(row.finished_at) || "—"}.
+            </p>
+          ))}
+        </div>
+      )}
+      {(data.included || []).filter((row) => row.finished_at).slice(0, 6).map((row) => (
+        <p key={row.id} className="muted">
+          Included upload {row.filename || row.id} finished {formatWhen(row.finished_at)}.
+        </p>
+      ))}
     </div>
   );
 }
@@ -357,6 +444,7 @@ export default function ImportPage({ onGo, onQueued, busy: reportBusy, run }) {
         column_map: s.column_map || {},
         unique_key: s.unique_key || [],
         event_mode: s.event_mode || "skip",
+        mapping_confirmed: Boolean(s.mapping_confirmed),
       };
     });
     return out;
@@ -400,6 +488,7 @@ export default function ImportPage({ onGo, onQueued, busy: reportBusy, run }) {
         ...s,
         skip: Boolean(s.skip) || !s.type,
         event_mode: s.event_mode || "skip",
+        mapping_confirmed: false,
         mapping_touched: false,
       }));
       setSheets(rows);
@@ -437,11 +526,15 @@ export default function ImportPage({ onGo, onQueued, busy: reportBusy, run }) {
       const out = await api.previewUpload(file, "", mapsPayload(next));
       const rows = (out.sheets || []).map((s, i) => {
         const plannedSkip = Boolean(next[i]?.skip);
+        const prev = next[i] || {};
+        const sameDrift = JSON.stringify(prev.header_changes || {}) === JSON.stringify(s.header_changes || {});
+        const typeChanged = (prev.type || null) !== (s.type || null);
         return {
           ...s,
           skip: plannedSkip,
-          type: plannedSkip ? null : (s.type || next[i]?.type || null),
-          event_mode: next[i]?.event_mode || "skip",
+          type: plannedSkip ? null : (s.type || prev.type || null),
+          event_mode: typeChanged ? (s.event_mode || "skip") : (prev.event_mode || s.event_mode || "skip"),
+          mapping_confirmed: sameDrift ? Boolean(prev.mapping_confirmed) : false,
           mapping_touched: false,
         };
       });
@@ -535,6 +628,7 @@ export default function ImportPage({ onGo, onQueued, busy: reportBusy, run }) {
         sheets: doc.sheets || [],
         dry_run: Boolean(doc.dry_run),
         file_sha256: doc.file_sha256 || "",
+        finished_at: doc.finished_at || "",
       });
       if (doc.status === "failed" && doc.message) setErr(doc.message);
       if (doc.message === "Already imported") setErr("This file is already imported.");
@@ -623,10 +717,15 @@ export default function ImportPage({ onGo, onQueued, busy: reportBusy, run }) {
       <div className="card">
         <h2>Import</h2>
         <p className="muted">
-          Import sales, item-wise sales, outstanding, receipts, and payments from an Excel workbook.
-          A short wizard maps each sheet, then imports and can create reports.
+          Choose a file, preview with the last import mode, commit, then create the report.
+          Outstanding and stock stay upserts with an effective date.
         </p>
-        <button type="button" onClick={openWizard}>Start import</button>
+        <div className="row gap">
+          <button type="button" onClick={openWizard}>Start import</button>
+          <button type="button" className="secondary" onClick={openWizard}>Refresh</button>
+        </div>
+        <RefreshStatus runId={run?.status === "succeeded" ? run.id : ""} active />
+        <OnboardingPreview active />
       </div>
 
       {wizardOpen ? (
@@ -652,7 +751,7 @@ export default function ImportPage({ onGo, onQueued, busy: reportBusy, run }) {
               {stepId === "file" ? (
                 <div>
                   <h4>Select a file</h4>
-                  <p className="muted">Excel or CSV workbook. Sheets are detected on the next step.</p>
+                  <p className="muted">Excel or CSV workbook. The last import mode for each sheet is selected again on the Existing step.</p>
                   <label className="dropzone">
                     <input type="file" accept=".xlsx,.xls,.csv" onChange={(e) => onPickFile(e.target.files[0])} />
                     <strong>{file ? file.name : "Choose a file"}</strong>
@@ -745,6 +844,19 @@ export default function ImportPage({ onGo, onQueued, busy: reportBusy, run }) {
                             <strong>{s.sheet}</strong>
                             <div className="muted">{friendlyType(s.type)} · {s.row_count} rows</div>
                             {!ready && missing.length ? <div className="warn">{missing.join(" · ")}</div> : null}
+                            {s.header_changes?.changed ? (
+                              <div className="warn">
+                                Headers changed.
+                                {(s.header_changes.removed || []).length ? ` Removed: ${s.header_changes.removed.join(", ")}.` : ""}
+                                {(s.header_changes.added || []).length ? ` Added: ${s.header_changes.added.join(", ")}.` : ""}
+                                {" "}Confirm the mapping before import.
+                                {s.mapping_confirmed ? null : (
+                                  <div style={{ marginTop: 8 }}>
+                                    <button type="button" onClick={() => updateSheet(idx, { mapping_confirmed: true })}>Confirm mapping</button>
+                                  </div>
+                                )}
+                              </div>
+                            ) : null}
                           </div>
                           <span className={"pill " + (ready ? "ok" : "warn")}>{ready ? "Ready" : "Needs mapping"}</span>
                           <button type="button" className="secondary" onClick={() => setMapSheetIdx(idx)}>Set mapping</button>
@@ -889,7 +1001,13 @@ export default function ImportPage({ onGo, onQueued, busy: reportBusy, run }) {
                       ) : null}
                     </div>
                   ) : null}
-                  <OnboardingPreview active={Boolean(importResult) && !importResult?.dry_run} />
+                  {importResult?.finished_at ? (
+                    <p className="muted">Upload finished {formatWhen(importResult.finished_at)}.</p>
+                  ) : null}
+                  <OnboardingPreview active={Boolean(importResult) && !importResult?.dry_run} reportDate={reportDate} />
+                  {run?.status === "succeeded" ? (
+                    <RefreshStatus runId={run.id} active />
+                  ) : null}
                   {importResult?.upload_id || importResult?.id ? (
                     <p>
                       <button type="button" className="secondary" onClick={undoImport}>
@@ -984,6 +1102,7 @@ export default function ImportPage({ onGo, onQueued, busy: reportBusy, run }) {
               ])),
               mapping_touched: true,
               missing,
+              mapping_confirmed: true,
               ready: missing.length === 0,
             });
             setMapSheetIdx(null);

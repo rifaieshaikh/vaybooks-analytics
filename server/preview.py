@@ -231,6 +231,27 @@ def _alias_dest(header, type_name):
     return raw
 
 
+def header_drift(saved_map, headers):
+    """Saved source headers that the new file added, removed, or renamed."""
+    saved_keys = []
+    for key in (saved_map or {}):
+        text = str(key or "").strip()
+        if text and text not in saved_keys:
+            saved_keys.append(text)
+    if not saved_keys:
+        return {"added": [], "removed": [], "changed": False}
+    have = []
+    for header in headers or []:
+        text = str(header or "").strip()
+        if text and text not in have:
+            have.append(text)
+    have_set = set(have)
+    saved_set = set(saved_keys)
+    removed = [key for key in saved_keys if key not in have_set]
+    added = [header for header in have if header not in saved_set]
+    return {"added": added, "removed": removed, "changed": bool(removed or added)}
+
+
 def suggest_column_map(headers, type_name, saved_map=None):
     saved_map = dict(saved_map or {})
     out = {}
@@ -312,8 +333,15 @@ def preview_frames(store, frames, forced_type=None, overrides=None):
         if override is None and type_name and not is_sheet_plan(plan):
             override = mapper_override(overrides.get(type_name)) if type_name else None
         mapper = effective_mapper(store, type_name, override) if type_name else {"column_map": {}, "unique_key": []}
+        stored = store.get_mapper(type_name) if type_name else None
         column_map = suggest_column_map(headers, type_name, mapper.get("column_map")) if type_name else {h: h for h in headers}
         unique_key = list((override or {}).get("unique_key") or mapper.get("unique_key") or [])
+        drift = header_drift((stored or {}).get("column_map") or {}, headers) if type_name else {
+            "added": [], "removed": [], "changed": False,
+        }
+        event_mode = str((stored or {}).get("event_mode") or "skip")
+        if isinstance(plan, dict) and str(plan.get("event_mode") or "").strip():
+            event_mode = str(plan.get("event_mode")).strip().lower()
         if skip:
             missing = []
             ready = False
@@ -322,6 +350,8 @@ def preview_frames(store, frames, forced_type=None, overrides=None):
             ready = not missing and bool(unique_key)
         else:
             missing = ["Map this sheet to an import type, or skip it"]
+            ready = False
+        if drift["changed"] and not (isinstance(plan, dict) and plan.get("mapping_confirmed")):
             ready = False
         from server.settings import ITEM_ATTR_FIELDS
         extra_dests = list(ITEM_ATTR_FIELDS) if type_name in ("items", "stock") else []
@@ -343,6 +373,8 @@ def preview_frames(store, frames, forced_type=None, overrides=None):
             "fields": dest_fields,
             "missing": missing,
             "ready": ready,
+            "event_mode": event_mode if type_name else "skip",
+            "header_changes": drift,
             "sample": sample_rows(headers, values, column_map) if type_name and not skip else sample_rows(headers, values, {h: h for h in headers}),
         })
     return {"sheets": sheets}

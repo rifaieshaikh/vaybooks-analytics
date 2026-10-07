@@ -16,6 +16,8 @@ There is **no live AppSheet API**. The workflow is always: **export Excel from A
 
 For the full catalogue of product capabilities, see **[Available features](#available-features)** below.
 
+For proposed customer-value improvements, delivery priorities, and acceptance criteria, see the [Product improvement plan](docs/product-improvement-plan.md).
+
 Phase 0 product definition (buyers, pilots, shared model, org policy) lives in **[`docs/phase0/`](docs/phase0/)**. Expense category account names are seeded from the `vay_wholesale` pack into Organization settings — they are not hard-coded in report formula modules.
 
 Phase 1 gate support: import provenance (`file_sha256`, mapper versions, row counts), import modes (`skip` / `update` / `replace_batch` / `replace_period`) with dry-run preview and undo, reconciliation via `*.recon.json` sidecars (`POST /api/recon/sidecars`), and Create run **manifests** (“Why these numbers?”) including data/calculation versions.

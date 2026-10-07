@@ -925,7 +925,14 @@ def _fix_text(exc):
     return "Open the affected report and correct the source file."
 
 
-def onboarding_checklist(eligibility, present_types):
+def _control_money(value):
+    try:
+        return "%.2f" % float(value)
+    except (TypeError, ValueError):
+        return "0.00"
+
+
+def onboarding_checklist(eligibility, present_types, sources=None, controls=None):
     """What the current files can and cannot support."""
     present = set(present_types or [])
     needed = (
@@ -946,7 +953,27 @@ def onboarding_checklist(eligibility, present_types):
             "reason": reason,
             "fix": "" if status == "eligible" else _fix_text({"metric_id": metric_id, "message": reason}),
         })
-    return {"missing_files": missing, "metrics": metrics}
+    exceptions = []
+    labels = {"sales": "Sales", "outstanding": "Outstanding"}
+    for key, label in labels.items():
+        entry = (controls or {}).get(key) or {}
+        if entry.get("entered") is None or entry.get("match"):
+            continue
+        exceptions.append({
+            "id": "%s_control" % key,
+            "message": "%s total %s does not match the entered total %s." % (
+                label,
+                _control_money(entry.get("actual")),
+                _control_money(entry.get("entered")),
+            ),
+        })
+    return {
+        "missing_files": missing,
+        "metrics": metrics,
+        "sources": list(sources or []),
+        "controls": controls or {},
+        "exceptions": exceptions,
+    }
 
 
 def excel_reports(bundle):

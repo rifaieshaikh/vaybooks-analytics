@@ -68,6 +68,59 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status }),
     }),
+  collection: (params) => {
+    const q = {};
+    Object.entries(params || {}).forEach(([k, v]) => {
+      if (v !== undefined && v !== null && String(v) !== "") q[k] = v;
+    });
+    const qs = new URLSearchParams(q).toString();
+    return req("/api/collection" + (qs ? "?" + qs : ""));
+  },
+  collectionQueues: () => req("/api/collection/queues"),
+  createCollectionContact: (body) =>
+    req("/api/collection/contacts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body || {}),
+    }),
+  updateCollectionContact: (id, body) =>
+    req("/api/collection/contacts/" + encodeURIComponent(id), {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body || {}),
+    }),
+  createCollectionPromise: (body) =>
+    req("/api/collection/promises", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body || {}),
+    }),
+  updateCollectionPromise: (id, body) =>
+    req("/api/collection/promises/" + encodeURIComponent(id), {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body || {}),
+    }),
+  createCollectionDispute: (body) =>
+    req("/api/collection/disputes", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body || {}),
+    }),
+  updateCollectionDispute: (id, body) =>
+    req("/api/collection/disputes/" + encodeURIComponent(id), {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body || {}),
+    }),
+  confirmCollectionAllocation: (body) =>
+    req("/api/collection/allocations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body || {}),
+    }),
+  clearCollectionAllocation: (id) =>
+    req("/api/collection/allocations/" + encodeURIComponent(id), { method: "DELETE" }),
   review: (params) => {
     const q = {};
     Object.entries(params || {}).forEach(([k, v]) => {
@@ -135,6 +188,10 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body || {}),
     }),
+  refresh: (runId) => {
+    const qs = runId ? "?run=" + encodeURIComponent(runId) : "";
+    return req("/api/analytics/refresh" + qs);
+  },
   onboarding: (params) => {
     const q = {};
     Object.entries(params || {}).forEach(([k, v]) => {
@@ -509,7 +566,7 @@ export const api = {
     Object.entries(params || {}).forEach(([k, v]) => {
       if (v !== undefined && v !== null && String(v) !== "") q[k] = v;
     });
-    const view = q.view === "customer" ? "customer" : "rep";
+    const view = q.view === "customer" || q.view === "reminder" ? q.view : "rep";
     q.view = view;
     const qs = new URLSearchParams(q).toString();
     const res = await req("/api/customers/" + encodeURIComponent(uk) + "/pdf?" + qs);
@@ -517,7 +574,7 @@ export const api = {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    const kind = view === "customer" ? "statement" : "brief";
+    const kind = view === "customer" ? "statement" : view === "reminder" ? "reminder" : "brief";
     a.download = "customer_" + (name || kind).replace(/\s+/g, "_") + "_" + kind + ".pdf";
     a.click();
     URL.revokeObjectURL(url);

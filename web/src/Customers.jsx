@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useState } from "react";
 import SectionTabs, { rememberedTab } from "./SectionTabs";
 import { api } from "./api";
+import CollectionFollowUp from "./CollectionFollowUp";
 import { CHART, can } from "./theme";
 import { AGE_KEYS, AGE_LABELS, ageLabel, bandKey, bucketMoney, hashBack, hashGet, hashReturnLabel, hashSet, initials, money, moneyOrDash, round2, rowBucket } from "./format";
 import AgeBar, { ageParts } from "./AgeBar";
@@ -483,7 +484,7 @@ function firstBuyingPeriod(periods, fallback) {
   return BUYING_PERIODS.find((id) => ((periods[id] || {}).items || []).length) || "all";
 }
 
-const CUSTOMER_TABS = ["due", "settlements", "ar-mismatch", "sales", "quantity", "years", "buying", "repurchase", "ordering", "order-check", "activity"];
+const CUSTOMER_TABS = ["due", "settlements", "ar-mismatch", "sales", "quantity", "years", "buying", "repurchase", "ordering", "order-check", "activity", "follow-up"];
 
 function customerTabGroups(detail) {
   const open = Number(detail.invoices_waiting) || 0;
@@ -506,11 +507,12 @@ function customerTabGroups(detail) {
     ] },
     { tabs: [
       { id: "activity", label: "Activity" },
+      { id: "follow-up", label: "Follow-up" },
     ] },
   ];
 }
 
-function Profile({ detail, runId, canSales, canStock, canEditDueDays, onBack, onPdf, pdfBusy, backLabel, onOpenInvoice, onOpenItem, onReload }) {
+function Profile({ detail, runId, canSales, canStock, canEditDueDays, canManage, user, onBack, onPdf, pdfBusy, backLabel, onOpenInvoice, onOpenItem, onReload }) {
   const [tab, setTab] = useState(() => rememberedTab("customer", "due", CUSTOMER_TABS));
   const [filter, setFilter] = useState("all");
   const [period, setPeriod] = useState(() => firstBuyingPeriod((detail.buying || {}).periods || {}, (detail.buying || {}).default_period || "this_year"));
@@ -599,6 +601,9 @@ function Profile({ detail, runId, canSales, canStock, canEditDueDays, onBack, on
               </button>
               <button type="button" className="ghost" disabled={pdfBusyAny} onClick={() => pickShare("rep")}>
                 Rep copy
+              </button>
+              <button type="button" className="ghost" disabled={pdfBusyAny} onClick={() => pickShare("reminder")}>
+                Payment reminder
               </button>
               <button type="button" className="ghost" disabled={pdfBusyAny} onClick={() => setShareOpen(false)}>
                 Cancel
@@ -717,6 +722,16 @@ function Profile({ detail, runId, canSales, canStock, canEditDueDays, onBack, on
       {tab === "order-check" ? (
         <OrderCheckPanel detail={detail} canEdit={canEditDueDays} onSaved={() => onReload && onReload()} />
       ) : null}
+      {tab === "follow-up" ? (
+        <CollectionFollowUp
+          customerName={detail.name}
+          customerUk={detail.uk}
+          invoices={detail.open_invoices || parts.due?.open_invoices}
+          canManage={canManage}
+          user={user}
+          onReminder={() => onPdf("reminder")}
+        />
+      ) : null}
       {tab === "activity" ? (
         sectionPending ? <EmptyCard title="Loading activity" copy="Reading sales, credit notes, and collections." /> : (
         <div className="card">
@@ -809,6 +824,7 @@ export default function CustomersPage({ user, runId }) {
   const canSales = can(user, "sales.view");
   const canStock = can(user, "stock.view");
   const canEditDueDays = can(user, "settings.advanced");
+  const canManage = can(user, "actions.manage");
 
   function loadList(nextFilters, nextPage, nextSort, nextDir, nextQ) {
     setLoading(true);
@@ -882,6 +898,8 @@ export default function CustomersPage({ user, runId }) {
             canSales={canSales}
             canStock={canStock}
             canEditDueDays={canEditDueDays}
+            canManage={canManage}
+            user={user}
             backLabel={hashReturnLabel("Customers")}
             pdfBusy={pdfBusy}
             onBack={goBack}

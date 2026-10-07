@@ -168,6 +168,41 @@ class ActionStatusBody(BaseModel):
     status: str = ""
 
 
+class CollectionContactBody(BaseModel):
+    customer_name: str = ""
+    action_id: str = ""
+    contacted_on: str = ""
+    staff: str = ""
+    channel: str = ""
+    note: str = ""
+    next_step: str = ""
+    next_follow_up: str = ""
+
+
+class CollectionPromiseBody(BaseModel):
+    customer_name: str = ""
+    action_id: str = ""
+    amount: float | None = None
+    promised_on: str = ""
+    invoice_refs: list | str = ""
+
+
+class CollectionDisputeBody(BaseModel):
+    customer_name: str = ""
+    promise_id: str = ""
+    invoice_refs: list | str = ""
+    note: str = ""
+    status: str = ""
+    opened_on: str = ""
+
+
+class CollectionAllocationBody(BaseModel):
+    promise_id: str = ""
+    source_uk: str = ""
+    source_type: str = "receipt"
+    amount: float | None = None
+
+
 class AskBody(BaseModel):
     text: str = ""
     report_date: str = ""

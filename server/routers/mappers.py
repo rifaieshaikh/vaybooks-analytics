@@ -42,11 +42,16 @@ def apply_preset(type_name: str, preset_id: str, user=Depends(require_user)):
         "unique_key": list(preset.get("unique_key") or []),
         "extra_types": {},
     }
+    prior_mode = (get_store().get_mapper(type_name) or {}).get("event_mode")
+    if prior_mode:
+        payload["event_mode"] = prior_mode
     err = validate_mapper(type_name, payload)
     if err:
         raise HTTPException(400, err)
     saved = get_store().put_mapper(type_name, payload)
     saved["preset_id"] = preset_id
+    if preset.get("shape"):
+        saved["shape"] = preset["shape"]
     return saved
 
 
@@ -65,6 +70,9 @@ def put_mapper(type_name: str, body: MapperBody, user=Depends(require_user)):
         raise HTTPException(400, "Unknown type")
     assert_perm(user, type_perm(type_name, "map"))
     payload = body.model_dump()
+    prior_mode = (get_store().get_mapper(type_name) or {}).get("event_mode")
+    if prior_mode:
+        payload["event_mode"] = prior_mode
     err = validate_mapper(type_name, payload)
     if err:
         raise HTTPException(400, err)

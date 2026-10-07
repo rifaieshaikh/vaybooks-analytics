@@ -3,7 +3,14 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from server.auth import assert_perm, require_user
-from server.phase2 import build_bundle, get_saved_views, onboarding, open_review_count, save_saved_view
+from server.phase2 import (
+    build_bundle,
+    get_saved_views,
+    onboarding,
+    open_review_count,
+    refresh_status,
+    save_saved_view,
+)
 from server.schemas import SavedViewBody
 from server.store import get_store
 
@@ -66,6 +73,16 @@ def api_save_view(body: SavedViewBody, user=Depends(require_user)):
     return {"views": views}
 
 
+def _control_value(raw):
+    text = str(raw or "").strip().replace(",", "")
+    if not text:
+        return None
+    try:
+        return round(float(text), 2)
+    except ValueError as exc:
+        raise HTTPException(400, "Enter a number for the agreed total.") from exc
+
+
 @router.get("/api/analytics/onboarding")
 def api_onboarding(request: Request, user=Depends(require_user)):
     store = get_store()
@@ -76,4 +93,31 @@ def api_onboarding(request: Request, user=Depends(require_user)):
             report_date = run.get("report_date") or ""
         except HTTPException:
             report_date = ""
-    return onboarding(store, report_date)
+    entered = None
+    params = request.query_params
+    if "control_sales" in params or "control_outstanding" in params:
+        entered = {}
+        if "control_sales" in params:
+            entered["sales"] = _control_value(params.get("control_sales"))
+        if "control_outstanding" in params:
+            entered["outstanding"] = _control_value(params.get("control_outstanding"))
+    return onboarding(store, report_date, entered)
+
+
+@router.get("/api/analytics/refresh")
+def api_refresh(request: Request, user=Depends(require_user)):
+    store = get_store()
+    run_id = request.query_params.get("run") or ""
+    run = store.get_run(run_id) if run_id else None
+    if not run:
+        runs = [row for row in (store.list_runs() or []) if row.get("status") == "succeeded"]
+        run = runs[0] if runs else None
+    if not run:
+        return {
+            "current": True,
+            "missing": [],
+            "included": [],
+            "report_finished_at": "",
+            "types_used": [],
+        }
+    return refresh_status(store, run)

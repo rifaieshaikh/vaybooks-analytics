@@ -17,7 +17,7 @@ from server.provenance import file_sha256, normalize_event_mode, parse_effective
 from server.reconcile import parse_recon_sidecar
 from server.route_helpers import parse_maps, pick_frame, start_import_job
 from server.settings import MAX_UPLOAD_BYTES, SOURCE_TYPES, sync_jobs
-from server.store import get_store
+from server.store import get_store, now_utc
 from server.uploads_io import read_upload_limited
 
 router = APIRouter()
@@ -146,6 +146,7 @@ async def upload(
         "mapper_versions": mapper_versions,
         "effective_dates": effective_dates,
         "effective_date": eff or effective_dates.get("arr") or effective_dates.get("stock"),
+        **({} if is_dry else {"finished_at": now_utc()}),
     })
     stored = store.get_upload(upload_id) or {}
     return {

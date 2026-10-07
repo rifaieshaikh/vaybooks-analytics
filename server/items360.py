@@ -1009,6 +1009,32 @@ def _build_item_cards(book):
     return cards, default_min, default_max_days
 
 
+def purchase_plans(store):
+    """Holding-based buy fields. The same buy_qty Item 360 shows for each item."""
+    from server.book import load_book
+    book = load_book(store)
+    cards, _, _ = _build_item_cards(book)
+    plans = []
+    for card in cards:
+        plans.append({
+            "name": card.get("name") or "",
+            "buy_qty": card.get("buy_qty") or 0.0,
+            "buy_by": card.get("buy_by") or "",
+            "buy_by_label": card.get("buy_by_label") or "",
+            "pace": card.get("pace") or 0,
+            "pace_days": card.get("pace_days") or 0,
+            "fill_to": card.get("fill_to") or 0,
+            "min_hold": card.get("min_hold") or 0,
+            "lead_days": int(card.get("lead_days") or 0),
+            "on_hand": card.get("qty") or 0,
+            "discontinued": bool(card.get("discontinued")),
+            "reason": _next_move(card),
+            "unit_cost": card.get("rate"),
+            "supplier": card.get("supplier") or "",
+        })
+    return plans
+
+
 def list_items(store, params):
     from server.book import load_book
     book = load_book(store)

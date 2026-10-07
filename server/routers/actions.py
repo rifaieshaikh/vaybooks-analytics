@@ -12,10 +12,30 @@ from server.actions import (
     suggestions,
 )
 from server.auth import assert_perm, require_user
+from server.collection import (
+    clear_allocation,
+    confirm_allocation,
+    create_contact,
+    create_dispute,
+    create_promise,
+    customer_follow_up,
+    follow_up_queues,
+    update_contact,
+    update_dispute,
+    update_promise,
+)
 from server.org_policy import get_org_policy
 from server.phase2 import build_bundle, open_review_count
 from server.reorder import build_reorder, save_proposal, _load
-from server.schemas import ActionBody, ActionStatusBody, ReorderBody
+from server.schemas import (
+    ActionBody,
+    ActionStatusBody,
+    CollectionAllocationBody,
+    CollectionContactBody,
+    CollectionDisputeBody,
+    CollectionPromiseBody,
+    ReorderBody,
+)
 from server.store import get_store
 from server.weekly import ensure_weekly_run_once
 
@@ -34,6 +54,18 @@ _READ = (
 def _can_read(user):
     perms = set(user.get("permissions") or [])
     return any(name in perms for name in _READ)
+
+
+def _can_read_customer(user):
+    if _can_read(user):
+        return True
+    return "customer.view" in (user.get("permissions") or [])
+
+
+def _collection_error(exc):
+    message = str(exc)
+    status = 404 if "not found" in message.lower() else 400
+    raise HTTPException(status, message) from exc
 
 
 def _run(store, run_id):
@@ -98,6 +130,95 @@ def api_action_status(action_id: str, body: ActionStatusBody, user=Depends(requi
         raise HTTPException(404 if message == "Action not found" else 400, message) from exc
 
 
+@router.get("/api/collection/queues")
+def api_collection_queues(user=Depends(require_user)):
+    if not _can_read(user):
+        raise HTTPException(403, "Forbidden")
+    return follow_up_queues(get_store())
+
+
+@router.get("/api/collection")
+def api_collection_customer(request: Request, user=Depends(require_user)):
+    if not _can_read_customer(user):
+        raise HTTPException(403, "Forbidden")
+    try:
+        return customer_follow_up(get_store(), request.query_params.get("customer") or "")
+    except ValueError as exc:
+        _collection_error(exc)
+
+
+@router.post("/api/collection/contacts")
+def api_create_contact(body: CollectionContactBody, user=Depends(require_user)):
+    assert_perm(user, "actions.manage")
+    try:
+        return create_contact(get_store(), body.model_dump(), user.get("username") or "")
+    except ValueError as exc:
+        _collection_error(exc)
+
+
+@router.patch("/api/collection/contacts/{contact_id}")
+def api_update_contact(contact_id: str, body: CollectionContactBody, user=Depends(require_user)):
+    assert_perm(user, "actions.manage")
+    try:
+        return update_contact(get_store(), contact_id, body.model_dump(exclude_unset=True), user.get("username") or "")
+    except ValueError as exc:
+        _collection_error(exc)
+
+
+@router.post("/api/collection/promises")
+def api_create_promise(body: CollectionPromiseBody, user=Depends(require_user)):
+    assert_perm(user, "actions.manage")
+    try:
+        return create_promise(get_store(), body.model_dump(), user.get("username") or "")
+    except ValueError as exc:
+        _collection_error(exc)
+
+
+@router.patch("/api/collection/promises/{promise_id}")
+def api_update_promise(promise_id: str, body: CollectionPromiseBody, user=Depends(require_user)):
+    assert_perm(user, "actions.manage")
+    try:
+        return update_promise(get_store(), promise_id, body.model_dump(exclude_unset=True), user.get("username") or "")
+    except ValueError as exc:
+        _collection_error(exc)
+
+
+@router.post("/api/collection/disputes")
+def api_create_dispute(body: CollectionDisputeBody, user=Depends(require_user)):
+    assert_perm(user, "actions.manage")
+    try:
+        return create_dispute(get_store(), body.model_dump(), user.get("username") or "")
+    except ValueError as exc:
+        _collection_error(exc)
+
+
+@router.patch("/api/collection/disputes/{dispute_id}")
+def api_update_dispute(dispute_id: str, body: CollectionDisputeBody, user=Depends(require_user)):
+    assert_perm(user, "actions.manage")
+    try:
+        return update_dispute(get_store(), dispute_id, body.model_dump(exclude_unset=True), user.get("username") or "")
+    except ValueError as exc:
+        _collection_error(exc)
+
+
+@router.post("/api/collection/allocations")
+def api_confirm_allocation(body: CollectionAllocationBody, user=Depends(require_user)):
+    assert_perm(user, "actions.manage")
+    try:
+        return confirm_allocation(get_store(), body.model_dump(), user.get("username") or "")
+    except ValueError as exc:
+        _collection_error(exc)
+
+
+@router.delete("/api/collection/allocations/{allocation_id}")
+def api_clear_allocation(allocation_id: str, user=Depends(require_user)):
+    assert_perm(user, "actions.manage")
+    try:
+        return clear_allocation(get_store(), allocation_id, user.get("username") or "")
+    except ValueError as exc:
+        _collection_error(exc)
+
+
 @router.get("/api/review")
 def api_review(request: Request, user=Depends(require_user)):
     if not _can_read(user):
@@ -134,24 +255,12 @@ def api_reorder(request: Request, user=Depends(require_user)):
             "reason": (bundle.get("stock") or {}).get("reason") or "Unavailable",
             "lines": [],
         }
-    policy = get_org_policy(store)
-    limit = (policy.get("thresholds") or {}).get("cover_days")
-    if limit in ("", None):
-        limit = 30
-    costs = {}
-    for doc in store.rows_of_type("stock") or []:
-        fields = doc.get("fields") or {}
-        name = str(fields.get("Item Name") or "").strip()
-        raw = fields.get("P.Price")
-        if not name or raw in ("", None):
-            continue
-        try:
-            costs[name] = float(str(raw).replace(",", ""))
-        except (TypeError, ValueError):
-            continue
+    from server.items360 import purchase_plans
+    from vay.eligibility import latest_snapshot_date
     proposal = _load(store)
-    built = build_reorder((bundle.get("stock") or {}).get("rows") or [], costs, proposal, cover_limit=limit)
+    built = build_reorder(purchase_plans(store), proposal)
     built["report_date"] = str(run.get("report_date") or "")[:10]
+    built["stock_date"] = latest_snapshot_date(store, "stock")
     built["status"] = "eligible"
     built["owners"] = _owners(store)
     built["can_manage"] = "actions.manage" in (user.get("permissions") or [])
@@ -163,24 +272,63 @@ def api_save_reorder(body: ReorderBody, user=Depends(require_user)):
     assert_perm(user, "actions.manage")
     store = get_store()
     from vay.phase3 import apply_budget, round_pack
+    stored = []
     rounded = []
     for line in body.lines or []:
         name = str(line.get("name") or "").strip()
         if not name:
             continue
-        qty = round_pack(line.get("qty"), line.get("pack_size"), line.get("minimum"))
-        rounded.append({
+        raw_qty = line.get("qty")
+        if raw_qty not in ("", None):
+            try:
+                if float(raw_qty) < 0:
+                    raise HTTPException(400, "Quantity must be zero or greater")
+            except HTTPException:
+                raise
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(400, "Reorder values must be numbers") from exc
+        manual = bool(line.get("manual")) if "manual" in line else raw_qty not in ("", None)
+        pack = line.get("pack_size") or 0
+        minimum = line.get("minimum") or 0
+        qty = round_pack(raw_qty, pack, minimum) if manual else None
+        raw_cost = line.get("unit_cost")
+        if raw_cost in ("", None):
+            unit_cost = None
+        else:
+            try:
+                unit_cost = float(raw_cost)
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(400, "Reorder values must be numbers") from exc
+        stored.append({
             "name": name,
             "qty": qty,
-            "pack_size": line.get("pack_size") or 0,
-            "minimum": line.get("minimum") or 0,
+            "manual": manual,
+            "basis_qty": line.get("basis_qty") if manual else None,
+            "pack_size": pack,
+            "minimum": minimum,
             "lead_days": int(line.get("lead_days") or 0),
             "supplier": str(line.get("supplier") or "").strip(),
-            "unit_cost": line.get("unit_cost") or 0,
         })
-    kept, spent = apply_budget(rounded, body.budget)
+        rounded.append({
+            "name": name,
+            "qty": qty if manual else round_pack(raw_qty, pack, minimum),
+            "pack_size": pack,
+            "minimum": minimum,
+            "lead_days": int(line.get("lead_days") or 0),
+            "supplier": str(line.get("supplier") or "").strip(),
+            "unit_cost": unit_cost,
+        })
+    budget_rows = []
+    zeroed = []
+    for row in rounded:
+        if float(row.get("qty") or 0) <= 0.009:
+            zeroed.append(dict(row, included=False, defer_reason="Quantity set to zero"))
+        else:
+            budget_rows.append(row)
+    kept, spent, deferred = apply_budget(budget_rows, body.budget)
+    deferred = zeroed + deferred
     try:
-        saved = save_proposal(store, {"budget": body.budget, "lines": kept})
+        saved = save_proposal(store, {"budget": body.budget, "lines": stored})
     except (TypeError, ValueError) as exc:
         raise HTTPException(400, "Reorder values must be numbers") from exc
     report_date = body.report_date
@@ -192,8 +340,9 @@ def api_save_reorder(body: ReorderBody, user=Depends(require_user)):
     payload = {
         "saved": saved,
         "lines": kept,
+        "deferred": deferred,
         "spent": spent,
-        "stopped": len(kept) < len(rounded),
+        "stopped": any(row.get("defer_reason") == "Would pass the budget" for row in deferred),
     }
     if body.assign and report_date:
         from datetime import timedelta

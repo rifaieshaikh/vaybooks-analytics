@@ -14,6 +14,7 @@ from server.preview import (
     UPLOAD_TYPES,
     effective_mapper,
     guess_type,
+    header_drift,
     is_sheet_plan,
     mapper_override,
     override_for_sheet,
@@ -26,7 +27,8 @@ from server.provenance import (
     parse_effective_date,
 )
 from server.ingest import prepare_rows
-from server.settings import SOURCE_TYPES
+from server.settings import DEFAULT_UNIQUE_KEYS, SNAPSHOT_TYPES, SOURCE_TYPES
+from server.store import now_utc
 
 log = logging.getLogger("vay.import_jobs")
 _import_lock = threading.Lock()
@@ -34,6 +36,18 @@ _import_lock = threading.Lock()
 
 class Cancelled(Exception):
     pass
+
+
+def _remember_event_mode(store, type_name, event_mode):
+    if type_name in SNAPSHOT_TYPES:
+        return
+    current = dict(store.get_mapper(type_name) or {})
+    current["event_mode"] = normalize_event_mode(event_mode)
+    current.setdefault("column_map", {})
+    current.setdefault("extra_types", {})
+    if not current.get("unique_key"):
+        current["unique_key"] = list(DEFAULT_UNIQUE_KEYS.get(type_name) or [])
+    store.put_mapper(type_name, current)
 
 
 def process_frame(
@@ -53,15 +67,27 @@ def process_frame(
     if not mapper.get("unique_key"):
         per_type[type_name] = {"error": "Mapper unique_key is required for %s" % type_name}
         return
+    headers, values = frame_values(frame)
+    saved_map = (store.get_mapper(type_name) or {}).get("column_map") or {}
+    drift = header_drift(saved_map, headers)
+    confirmed = bool(isinstance(override, dict) and override.get("mapping_confirmed"))
+    if drift["changed"] and not confirmed and not dry_run:
+        per_type[type_name] = {"error": "Headers changed. Confirm the mapping before import."}
+        return
     if save_map and clean_ov and not dry_run:
         err = validate_mapper(type_name, mapper)
         if not err:
-            store.put_mapper(type_name, {
+            payload = {
                 "column_map": mapper.get("column_map") or {},
                 "unique_key": mapper.get("unique_key") or [],
                 "extra_types": mapper.get("extra_types") or {},
-            })
-    headers, values = frame_values(frame)
+            }
+            prior_mode = (store.get_mapper(type_name) or {}).get("event_mode")
+            if type_name not in SNAPSHOT_TYPES:
+                payload["event_mode"] = normalize_event_mode(event_mode)
+            elif prior_mode:
+                payload["event_mode"] = prior_mode
+            store.put_mapper(type_name, payload)
     counts = persist_type(
         store,
         type_name,
@@ -74,6 +100,8 @@ def process_frame(
         effective_date=effective_date,
     )
     per_type[type_name] = counts
+    if not dry_run and not (counts or {}).get("error"):
+        _remember_event_mode(store, type_name, event_mode)
 
 
 def merge_type_counts(dst, src):
@@ -441,6 +469,7 @@ def _run_import_job(store, job_id):
                         )
                         if k in info
                     }
+            finished = None if dry_run else now_utc()
             store.update_upload(job.get("upload_id"), {
                 "file_sha256": sha,
                 "row_counts": row_counts,
@@ -452,6 +481,7 @@ def _run_import_job(store, job_id):
                     or effective_dates.get("stock")
                     or upload.get("effective_date")
                 ),
+                **({"finished_at": finished} if finished else {}),
             })
             any_ok = any(not r.get("skipped") and not r.get("error") for r in sheet_results)
             any_fail = any(r.get("error") for r in sheet_results)
@@ -482,6 +512,7 @@ def _run_import_job(store, job_id):
                 "row_counts": row_counts,
                 "mapper_versions": mapper_versions,
                 "effective_dates": effective_dates,
+                **({"finished_at": now_utc()} if status == "succeeded" and not dry_run else {}),
             })
         except Cancelled:
             store.update_import_job(job_id, {"status": "cancelled", "message": "Cancelled"})
@@ -508,6 +539,7 @@ def import_job_payload(doc):
         "sheets": doc.get("sheets") or [],
         "event_mode": doc.get("event_mode") or "skip",
         "created_at": str(doc.get("created_at") or ""),
+        "finished_at": str(doc.get("finished_at") or ""),
         "file_sha256": doc.get("file_sha256") or "",
         "row_counts": doc.get("row_counts") or {},
         "mapper_versions": doc.get("mapper_versions") or {},
