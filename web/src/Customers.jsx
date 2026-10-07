@@ -2,6 +2,7 @@ import { Fragment, useEffect, useState } from "react";
 import SectionTabs, { rememberedTab } from "./SectionTabs";
 import { api } from "./api";
 import CollectionFollowUp from "./CollectionFollowUp";
+import ReminderDraft from "./ReminderDraft";
 import ExplainFigure from "./ExplainFigure";
 import { CHART, can } from "./theme";
 import { AGE_KEYS, AGE_LABELS, ageLabel, bandKey, bucketMoney, hashBack, hashGet, hashReturnLabel, hashSet, initials, money, moneyOrDash, round2, rowBucket } from "./format";
@@ -13,6 +14,35 @@ import RepurchasePanel from "./RepurchasePanel";
 import OrderingPanel, { DueDaysEditor, orderingHeroLine } from "./OrderingPanel";
 import OrderCheckPanel from "./OrderCheckPanel";
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+
+function StatementPreview({ detail, kind, onClose, onDownload }) {
+  const buckets = detail.owe_buckets || {};
+  const dueLabel = detail.credit ? "Advance" : "Amount due";
+  const dueValue = detail.credit ? Math.abs(detail.due) : detail.due;
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+        <div className="card-head">
+          <h3>{kind === "excel" ? "Statement workbook" : "Account statement"}</h3>
+          <button type="button" className="ghost" onClick={onClose}>Close</button>
+        </div>
+        <p className="muted">Review this statement before sharing it. Vay does not send it.</p>
+        <p>{detail.name}</p>
+        <p className="muted">{detail.as_of_label || detail.as_of || "Report date from the current snapshot"}</p>
+        <p>{dueLabel} {money(dueValue)}</p>
+        <p className="muted">{detail.invoices_waiting || 0} open invoices</p>
+        <p className="muted">
+          {AGE_KEYS.map((key) => ageLabel(key) + " " + money(buckets[key] || 0)).join(" · ")}
+        </p>
+        <p className="muted">The file adds the company name and currency from organization settings.</p>
+        <div className="modal-actions">
+          <button type="button" className="secondary" onClick={onClose}>Back</button>
+          <button type="button" onClick={onDownload}>{kind === "excel" ? "Download Excel" : "Download PDF"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function statusLabel(status) {
   if (status === "urgent") return "Urgent";
@@ -513,12 +543,13 @@ function customerTabGroups(detail) {
   ];
 }
 
-function Profile({ detail, runId, canSales, canStock, canEditDueDays, canManage, user, onBack, onPdf, pdfBusy, backLabel, onOpenInvoice, onOpenItem, onReload }) {
+function Profile({ detail, runId, canSales, canStock, canEditDueDays, canManage, user, onBack, onPdf, onExcel, pdfBusy, backLabel, onOpenInvoice, onOpenItem, onReload }) {
   const [tab, setTab] = useState(() => rememberedTab("customer", "due", CUSTOMER_TABS));
   const [filter, setFilter] = useState("all");
   const [period, setPeriod] = useState(() => firstBuyingPeriod((detail.buying || {}).periods || {}, (detail.buying || {}).default_period || "this_year"));
   const [shown, setShown] = useState(30);
   const [shareOpen, setShareOpen] = useState(false);
+  const [preview, setPreview] = useState("");
   const [dueBand, setDueBand] = useState("");
   const [parts, setParts] = useState({});
   const section = {
@@ -580,6 +611,10 @@ function Profile({ detail, runId, canSales, canStock, canEditDueDays, canManage,
 
   function pickShare(view) {
     setShareOpen(false);
+    if (view === "customer" || view === "reminder" || view === "excel") {
+      setPreview(view);
+      return;
+    }
     onPdf(view);
   }
 
@@ -606,12 +641,35 @@ function Profile({ detail, runId, canSales, canStock, canEditDueDays, canManage,
               <button type="button" className="ghost" disabled={pdfBusyAny} onClick={() => pickShare("reminder")}>
                 Payment reminder
               </button>
+              <button type="button" className="ghost" disabled={pdfBusyAny} onClick={() => pickShare("excel")}>
+                Customer Excel
+              </button>
               <button type="button" className="ghost" disabled={pdfBusyAny} onClick={() => setShareOpen(false)}>
                 Cancel
               </button>
             </div>
           </div>
         </div>
+      ) : null}
+      {preview === "reminder" ? (
+        <ReminderDraft
+          customerName={detail.name}
+          onClose={() => setPreview("")}
+          onDownload={() => { setPreview(""); onPdf("reminder"); }}
+        />
+      ) : null}
+      {preview === "customer" || preview === "excel" ? (
+        <StatementPreview
+          detail={detail}
+          kind={preview}
+          onClose={() => setPreview("")}
+          onDownload={() => {
+            const kind = preview;
+            setPreview("");
+            if (kind === "excel") onExcel();
+            else onPdf("customer");
+          }}
+        />
       ) : null}
       <div className={"hero card" + heroClass(detail.status)}>
         <div>
@@ -911,6 +969,12 @@ export default function CustomersPage({ user, runId }) {
             onPdf={(view) => {
               setPdfBusy(view || "rep");
               api.customerPdf(uk, detail.name, { view: view || "rep", run: runId || "" })
+                .catch((e) => setErr(e.message))
+                .finally(() => setPdfBusy(false));
+            }}
+            onExcel={() => {
+              setPdfBusy("xlsx");
+              api.customerExcel(uk, detail.name, { run: runId || "" })
                 .catch((e) => setErr(e.message))
                 .finally(() => setPdfBusy(false));
             }}

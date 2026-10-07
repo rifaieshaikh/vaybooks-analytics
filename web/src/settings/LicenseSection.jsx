@@ -17,6 +17,7 @@ export default function LicenseSection() {
       {data ? (
         <div className="stack">
           <p>{data.message}</p>
+          <p>Status {data.status || "active"} · {data.price}</p>
           <p className="muted">Version {data.version || "dev"}</p>
           <p>Wholesale {data.packs?.wholesale ? "enabled" : "off"} · Retail {data.packs?.retail ? "enabled" : "off"}</p>
           <p className="muted">{data.renewal_note}</p>

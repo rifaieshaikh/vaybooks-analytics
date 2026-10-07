@@ -830,6 +830,7 @@ function WeeklyReview({ run, user }) {
       </section>
       <section>
         <h3>Results</h3>
+        <button type="button" className="secondary" onClick={() => api.downloadReview(run?.id ? { run: run.id } : {}).catch((e) => setErr(e.message || "Could not download"))}>Download Excel</button>
         <div className="analytics-meta">
           <span>Open {data.results?.open_count || 0}</span>
           <span>Overdue {data.results?.overdue_count || 0}</span>
@@ -1000,6 +1001,7 @@ function ReorderPage({ run, user }) {
         {data.spent != null && budget !== "" ? (
           <span className="page-stat">Spent {money(data.spent)} of {money(Number(budget))}</span>
         ) : null}
+        <button type="button" className="secondary" onClick={() => api.downloadReorder(run?.id ? { run: run.id } : {}).catch((e) => setErr(e.message || "Could not download"))}>Download Excel</button>
       </div>
       <p className="muted">
         {data.order_rule || "Earliest buy-by, then larger quantity, then name."}

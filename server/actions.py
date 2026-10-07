@@ -405,6 +405,20 @@ def _scoped_actions(actions, scope, reps):
     return out
 
 
+def listed_review_opens(store, report_date):
+    """Opens already recorded for this report date. Does not write."""
+    report_date = str(report_date or "")[:10]
+    existing = store.find_row(SETTING_TYPE, REVIEW_OPENS_UK) if hasattr(store, "find_row") else None
+    fields = dict((existing or {}).get("fields") or {})
+    try:
+        opens = json.loads(fields.get("Opens") or "[]")
+    except (TypeError, ValueError):
+        opens = []
+    if not isinstance(opens, list):
+        opens = []
+    return [item for item in opens if isinstance(item, dict) and item.get("report_date") == report_date]
+
+
 def record_review_open(store, username, report_date):
     """One open per person and report date. A later open updates the time."""
     username = clean_text(username)

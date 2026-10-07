@@ -584,6 +584,41 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     }),
+  downloadWorkbook: async (path, filename) => {
+    const res = await req(path);
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  },
+  customerExcel: async (uk, name, params) => {
+    const q = {};
+    Object.entries(params || {}).forEach(([k, v]) => {
+      if (v !== undefined && v !== null && String(v) !== "") q[k] = v;
+    });
+    const qs = new URLSearchParams(q).toString();
+    const file = "customer_" + (name || "statement").replace(/\s+/g, "_") + "_statement.xlsx";
+    return api.downloadWorkbook("/api/customers/" + encodeURIComponent(uk) + "/xlsx" + (qs ? "?" + qs : ""), file);
+  },
+  downloadReorder: (params) => {
+    const q = {};
+    Object.entries(params || {}).forEach(([k, v]) => {
+      if (v !== undefined && v !== null && String(v) !== "") q[k] = v;
+    });
+    const qs = new URLSearchParams(q).toString();
+    return api.downloadWorkbook("/api/reorder/xlsx" + (qs ? "?" + qs : ""), "reorder_proposal.xlsx");
+  },
+  downloadReview: (params) => {
+    const q = {};
+    Object.entries(params || {}).forEach(([k, v]) => {
+      if (v !== undefined && v !== null && String(v) !== "") q[k] = v;
+    });
+    const qs = new URLSearchParams(q).toString();
+    return api.downloadWorkbook("/api/review/xlsx" + (qs ? "?" + qs : ""), "management_summary.xlsx");
+  },
   customerPdf: async (uk, name, params) => {
     const q = {};
     Object.entries(params || {}).forEach(([k, v]) => {

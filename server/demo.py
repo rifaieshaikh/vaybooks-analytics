@@ -88,16 +88,16 @@ def _seed_rows(store, username):
         "Date": _day(store, -20), "Party Name": "Harbour Traders", "Sales Rep": rep, "Net Amount": 80000,
     })
     _put(store, "arr", "demo-arr-harbour", {
-        "Account Name": "Harbour Traders", "Group": "Trade", "Balance": 80000,
+        "Account Name": "Harbour Traders", "Group": "Trade", "Balance": 80000, "EffectiveDate": today,
     })
     _put(store, "sales", "demo-sales-north", {
         "Date": _day(store, -15), "Party Name": "North Mill", "Sales Rep": rep, "Net Amount": 40000,
     })
     _put(store, "receipt", "demo-receipt-north", {
-        "Date": yesterday, "Account Name": "North Mill", "Sales Rep": rep, "Amount": 15000, "Invoice No": "NM-1",
+        "Date": yesterday, "Account Name": "North Mill", "Sales Rep": rep, "Amount": 15000,
     })
     _put(store, "arr", "demo-arr-north", {
-        "Account Name": "North Mill", "Group": "Trade", "Balance": 25000,
+        "Account Name": "North Mill", "Group": "Trade", "Balance": 25000, "EffectiveDate": today,
     })
     _put(store, "sales", "demo-sales-lane-old", {
         "Date": _day(store, -80), "Party Name": "Lane and Co", "Sales Rep": rep, "Net Amount": 90000,
@@ -109,8 +109,15 @@ def _seed_rows(store, username):
         "Date": _day(store, -10), "Item Name": "Oak Board 18mm", "Qty": 40, "Rate": 100,
     })
     _put(store, "stock", "demo-stock-oak", {
-        "Item Name": "Oak Board 18mm", "Qty": 8, "P.Price": 80,
+        "Item Name": "Oak Board 18mm", "Qty": 8, "P.Price": 80, "EffectiveDate": today,
     })
+    for name, balance in (("Harbour Traders", 80000), ("North Mill", 25000), ("Lane and Co", 0)):
+        _put(store, "customer", name, {
+            "Account Name": name, "Group": "Trade", "Balance": balance, "party_uk": name,
+        })
+        _put(store, "party", name, {
+            "Account Name": name, "Group": "Trade", "Balance": balance, "customer_uk": name,
+        })
     harbour = create_action(store, {
         "action_type": "collection",
         "subject_kind": "customer",

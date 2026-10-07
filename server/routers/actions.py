@@ -1,6 +1,6 @@
 """Phase 3 actions, weekly review, and reorder proposals."""
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 
 from server.actions import (
     _owners,
@@ -9,6 +9,7 @@ from server.actions import (
     create_action,
     default_due,
     list_action_rows,
+    listed_review_opens,
     record_review_open,
     set_status,
     suggestions,
@@ -285,15 +286,11 @@ def api_clear_allocation(allocation_id: str, user=Depends(require_user)):
         _collection_error(exc)
 
 
-@router.get("/api/review")
-def api_review(request: Request, user=Depends(require_user)):
-    if not _can_read(user):
-        raise HTTPException(403, "Forbidden")
-    store = get_store()
+def _review_payload(store, user, run_id, staff, record_open):
     ensure_weekly_run_once(store)
-    run = _run(store, request.query_params.get("run") or "")
+    run = _run(store, run_id)
     try:
-        scope = resolve_scope(store, user, request.query_params.get("staff") or "")
+        scope = resolve_scope(store, user, staff)
     except PermissionError as exc:
         raise HTTPException(403, "Forbidden") from exc
     except ValueError as exc:
@@ -305,7 +302,10 @@ def api_review(request: Request, user=Depends(require_user)):
     actions = _with_outcomes(store, report_date, bundle)
     week = [row for row in actions if str(row.get("report_date") or "")[:10] == report_date or not row.get("report_date")]
     week = _scoped_actions(week, scope, _rep_map(store))
-    opens = record_review_open(store, user.get("username") or "", report_date)
+    if record_open:
+        opens = record_review_open(store, user.get("username") or "", report_date)
+    else:
+        opens = listed_review_opens(store, report_date)
     return {
         "report_date": report_date,
         "suggestions": ideas,
@@ -317,6 +317,41 @@ def api_review(request: Request, user=Depends(require_user)):
     }
 
 
+@router.get("/api/review")
+def api_review(request: Request, user=Depends(require_user)):
+    if not _can_read(user):
+        raise HTTPException(403, "Forbidden")
+    return _review_payload(
+        get_store(),
+        user,
+        request.query_params.get("run") or "",
+        request.query_params.get("staff") or "",
+        True,
+    )
+
+
+@router.get("/api/review/xlsx")
+def api_review_xlsx(request: Request, user=Depends(require_user)):
+    if not _can_read(user):
+        raise HTTPException(403, "Forbidden")
+    store = get_store()
+    payload = _review_payload(
+        store,
+        user,
+        request.query_params.get("run") or "",
+        request.query_params.get("staff") or "",
+        False,
+    )
+    from server.sales_exports import review_reports, workbook_bytes
+    data = workbook_bytes(review_reports(payload, get_org_policy(store)))
+    stamp = (payload.get("report_date") or "today").replace("-", "")
+    return Response(
+        content=data,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=management_summary_%s.xlsx" % stamp},
+    )
+
+
 @router.get("/api/cash")
 def api_cash(user=Depends(require_user)):
     perms = set(user.get("permissions") or [])
@@ -326,18 +361,17 @@ def api_cash(user=Depends(require_user)):
     return build_cash(get_store())
 
 
-@router.get("/api/reorder")
-def api_reorder(request: Request, user=Depends(require_user)):
-    assert_perm(user, "reports.view.items", "actions.manage")
-    store = get_store()
-    run = _run(store, request.query_params.get("run") or "")
+def _reorder_payload(store, user, run_id):
+    run = _run(store, run_id)
     bundle = _bundle(store, run)
     if (bundle.get("stock") or {}).get("status") == "unavailable":
         return {
-            "report_date": run.get("report_date"),
+            "report_date": str(run.get("report_date") or "")[:10],
             "status": "unavailable",
             "reason": (bundle.get("stock") or {}).get("reason") or "Unavailable",
             "lines": [],
+            "order": [],
+            "held": [],
         }
     from server.items360 import purchase_plans
     from vay.eligibility import latest_snapshot_date
@@ -350,6 +384,27 @@ def api_reorder(request: Request, user=Depends(require_user)):
     built["can_manage"] = "actions.manage" in (user.get("permissions") or [])
     from server.explain import annotate_reorder
     return annotate_reorder(built, store, user.get("permissions") or [])
+
+
+@router.get("/api/reorder")
+def api_reorder(request: Request, user=Depends(require_user)):
+    assert_perm(user, "reports.view.items", "actions.manage")
+    return _reorder_payload(get_store(), user, request.query_params.get("run") or "")
+
+
+@router.get("/api/reorder/xlsx")
+def api_reorder_xlsx(request: Request, user=Depends(require_user)):
+    assert_perm(user, "reports.view.items", "actions.manage")
+    store = get_store()
+    built = _reorder_payload(store, user, request.query_params.get("run") or "")
+    from server.sales_exports import reorder_reports, workbook_bytes
+    data = workbook_bytes(reorder_reports(built, get_org_policy(store)))
+    stamp = (built.get("report_date") or "today").replace("-", "")
+    return Response(
+        content=data,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=reorder_proposal_%s.xlsx" % stamp},
+    )
 
 
 @router.put("/api/reorder")

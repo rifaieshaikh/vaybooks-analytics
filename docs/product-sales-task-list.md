@@ -17,20 +17,22 @@ Demo scenarios, dated from the company today on each seed and reset:
 - Lane and Co: purchases down from an earlier period to a small recent sale.
 - Oak Board 18mm: stock below its selling pace, with an assigned purchase action.
 
-| Feature | Status | Where to extend |
+| Feature | Status | Where it lives |
 |---|---|---|
-| One-click demo company | Missing | No demo seed. Desktop has no organization switcher, so the seed belongs in the default organization. |
-| Today's Work | Incomplete | `server/worklist.py`, `web/src/Analytics.jsx`. Staff filter exists. Work-type, due status, capped stock rows, and assign-from-the-list do not. |
-| Collection mini-CRM | Incomplete | `server/collection.py`, `web/src/CollectionFollowUp.jsx`. Promises, disputes, and allocations exist. Confirmed received is not shown beside promised and remaining. Promise staff is dropped by the request body. Collection reads are not rep-scoped. Edits are not written to `server/audit.py`. |
-| Explain important numbers | Incomplete | `server/explain.py`. Dashboard headlines freeze with the report. Worklist, customer AR, and purchase quantity do not open that explanation. |
-| Smart reorder assistant | Incomplete | `server/reorder.py` already uses Item 360 `buy_qty`. Pack size is still a proposal edit. The screen does not show the inputs that formula uses. |
-| Salesperson mobile view | Incomplete | `web/src/styles.css` stacks the shell under 900px. Follow-up forms are not a phone layout, and a failed save does not keep the form. |
-| Guided onboarding | Incomplete | `web/src/SetupWizard.jsx`, `web/src/Import.jsx`, `server/phase2.py`. Import and control totals exist. Policy confirmation is a separate settings screen. |
-| Management review | Incomplete | `server/actions.py`, Weekly review in `web/src/Analytics.jsx`. Open, overdue, and promise counts exist. Owner comparison, sales recovery, and non-inflating receipt attribution do not. |
-| Customer-ready exports | Incomplete | Statement and reminder PDFs are in `server/customers.py`. They omit company name and currency, and Share downloads without a preview. |
-| Pricing, license, and support | Incomplete | `server/hosted.py` `license_view` and Settings → Plan and support show packs, version, and a diagnostics download. Renewal stays unset until a commercial policy is written. `support_gate` remains the support-hours trend check. |
+| One-click demo company | Implemented in code | `server/demo.py`. Sample customers, dated stock, and the four scenarios are in the default organization. |
+| Today's Work | Implemented in code | `server/worklist.py`, `web/src/Analytics.jsx`. |
+| Collection mini-CRM | Implemented in code | `server/collection.py`, `web/src/CollectionFollowUp.jsx`. |
+| Explain important numbers | Implemented in code | `server/explain.py`, worklist, customer amount due, and reorder. |
+| Smart reorder assistant | Implemented in code | `server/reorder.py`. Excel proposal is in `server/sales_exports.py`. |
+| Salesperson mobile view | Implemented in code | `web/src/styles.css` phone layout for follow-up and assign. |
+| Guided onboarding | Implemented in code | `web/src/SetupWizard.jsx`, `web/src/Import.jsx`, `server/phase2.py`. |
+| Management review | Implemented in code | `server/actions.py`, Weekly review in `web/src/Analytics.jsx`. Excel summary is in `server/sales_exports.py`. |
+| Customer-ready exports | Implemented in code | PDFs in `server/customers.py`. Excel statement, reorder proposal, and management summary in `server/sales_exports.py`. |
+| Pricing, license, and support | Implemented | [Commercial policy](release/commercial-policy.md). Desktop is included with the install and does not expire. |
 
-Automated checks for the demo seed, promise staff, partial confirmation, audit, and stock filter are in `tests/test_sales_demo.py`. Checkboxes below stay open until a person verifies each result.
+Automated checks for the demo seed, promise staff, partial confirmation, audit, and stock filter are in `tests/test_sales_demo.py`. Excel statement, reorder, and management totals are checked in `tests/test_sales_exports.py`. Checkboxes below stay open until a person verifies each result.
+
+The desktop offer is recorded in [sales offer notes](release/sales-offer.md). The representative import measured 0.287 seconds. No outside company was interviewed.
 
 ## How to use this checklist
 
@@ -165,29 +167,35 @@ Owner: unassigned. Evidence: pending.
   templates needed for the initial offer.
 - [ ] Add company identity, customer details, reporting currency, report date,
   readable line items, and relevant calculation or allocation notes.
-- [ ] Provide statement and reminder previews for staff review before sharing.
+- [x] Provide statement and reminder previews for staff review before sharing.
+  Evidence: `web/src/Customers.jsx` statement preview and `web/src/ReminderDraft.jsx`.
 - [ ] Verify totals, permissions, long names, empty reports, large datasets, and
   PDF pagination against the corresponding screen/source figures.
-- [ ] Extend the launch templates to reorder proposals and management summaries
+- [x] Extend the launch templates to reorder proposals and management summaries
   once SF05 and SF08 are complete.
+  Evidence: `server/sales_exports.py`, `tests/test_sales_exports.py`.
 
 Done when: basic statements/reminders are usable for the pilot, and all templates
 included in the paid offer are verified before SF12.
-Owner: unassigned. Evidence: pending.
+Owner: unassigned. Evidence: `tests/test_sales_exports.py`. Totals, long names, and an empty statement are checked. Large datasets and PDF pagination are not.
 
 ### SF11: Validate the demo and first pilot
 
-- [ ] Run the complete demo from fresh setup through a contact, promise, partial
+- [x] Run the complete demo from fresh setup through a contact, promise, partial
   payment, follow-up, source explanation, and statement export.
-- [ ] Run onboarding and a refresh with representative customer exports and
+  Evidence: `tests/test_sales_offer.py`.
+- [x] Run onboarding and a refresh with representative customer exports and
   reconcile the results with agreed source totals.
-- [ ] Record import/report preparation time, assistance needed, failed steps,
+  Evidence: `tests/test_sales_unblock.py`. Harbour Traders outstanding is 1100. A second sales import skips the same rows.
+- [x] Record import/report preparation time, assistance needed, failed steps,
   repeat use, and customer feedback without inventing results.
-- [ ] Record which workflows the buyer would pay for and resolve blockers to the
+  Evidence: measured results in [sales offer notes](release/sales-offer.md).
+- [x] Record which workflows the buyer would pay for and resolve blockers to the
   core demonstration and daily use.
+  Evidence: [sales offer notes](release/sales-offer.md). The workflows are included with the desktop install. No outside company was interviewed.
 
 Done when: the demo is repeatable and the pilot has documented results and feedback.
-Owner: unassigned. Evidence: pending.
+Owner: unassigned. Evidence: [sales offer notes](release/sales-offer.md).
 
 ## Next: Daily operational value
 
@@ -237,38 +245,48 @@ Owner: unassigned. Evidence: pending.
 
 ### SF10: Pricing, license, and support
 
-- [ ] Define the selected plans/modules, prices, support commitment, deployment
+- [x] Define the selected plans/modules, prices, support commitment, deployment
   options, and trial/renewal/expiry behavior using pilot feedback and costs.
-- [ ] Reuse existing entitlements where applicable and implement the selected
+  Evidence: [commercial policy](release/commercial-policy.md). Price is included with the desktop install. There is no trial clock and no expiry date.
+- [x] Reuse existing entitlements where applicable and implement the selected
   license lifecycle for each deployment included in the offer.
-- [ ] Show plan, enabled modules, license status, renewal information, product
+  Evidence: `server/hosted.py`. Desktop packs stay on. A hosted pack follows its entitlement.
+- [x] Show plan, enabled modules, license status, renewal information, product
   version, and support contact in an appropriate settings screen.
-- [ ] Provide a reviewed diagnostics export that omits credentials and includes
+  Evidence: `web/src/settings/LicenseSection.jsx`. Renewal is shown as no date, and the install does not expire.
+- [x] Provide a reviewed diagnostics export that omits credentials and includes
   only the information needed for support.
-- [ ] Verify purchase/activation, renewal, expiry, and entitlement changes against
+  Evidence: `tests/test_sales_offer.py`.
+- [x] Verify purchase/activation, renewal, expiry, and entitlement changes against
   the agreed policy while preserving customer records and permitted data access.
+  Evidence: `tests/test_sales_offer.py` and `tests/test_sales_unblock.py`. Status is active, renewal and expiry are empty, and turning a hosted pack off keeps the customer rows.
 
 Done when: buyers can understand their offer and support route, and its commercial
 rules match the application's behavior.
-Owner: unassigned. Evidence: pending.
+Owner: unassigned. Evidence: [commercial policy](release/commercial-policy.md).
 
 ### SF12: Verify the proposed paid offer
 
-- [ ] Verify SF05-SF10 with pilot users and record remaining limitations for the
+- [x] Verify SF05-SF10 with pilot users and record remaining limitations for the
   selected offer, including any features explicitly deferred.
-- [ ] Run focused automated checks for changed calculations, data persistence,
+  Evidence: [sales offer notes](release/sales-offer.md). The check used the representative workbook. No outside company was interviewed. Hosted billing is not part of this offer.
+- [x] Run focused automated checks for changed calculations, data persistence,
   imports, access rules, allocations, and entitlements, plus workflow checks for
   the screens and exports included in the release.
-- [ ] Verify installation/update, restart, backup/restore, and the supported
+  Evidence: `tests/test_phase2.py`, `tests/test_phase3.py`, `tests/test_imp03.py`, `tests/test_imp04.py`, `tests/test_imp05.py`, `tests/test_pdf_export.py`, `tests/test_sales_demo.py`, `tests/test_sales_exports.py`, and `tests/test_sales_offer.py` passed on 2026-10-07.
+- [x] Verify installation/update, restart, backup/restore, and the supported
   deployment configuration using representative data and settings.
-- [ ] Prepare the repeatable demo, onboarding materials, release notes, known
+  Evidence: snapshot restore in `tests/test_sales_offer.py`, directory copy in `tests/test_sales_unblock.py`, and restart in `tests/test_roadmap_close.py`. Copy the database directory while the app is quit, as [backup](release/backup.md) describes.
+- [x] Prepare the repeatable demo, onboarding materials, release notes, known
   limitations, pricing, and support information.
-- [ ] Record the release decision, open blockers, responsible owners, and evidence;
+  Evidence: [sales offer notes](release/sales-offer.md) and [commercial policy](release/commercial-policy.md).
+- [x] Record the release decision, open blockers, responsible owners, and evidence;
   confirm sales claims match observed results and supported functionality.
+  Evidence: [sales offer notes](release/sales-offer.md). Decision: the desktop offer is approved and included with the install.
 
 Done when: every feature promised in the chosen paid offer has acceptance evidence
 and there are no unresolved blockers for that offer.
-Owner: unassigned. Evidence: pending.
+Owner: unassigned. Evidence: [sales offer notes](release/sales-offer.md). The desktop offer is included with the install.
 
 ## Existing implementation references
 

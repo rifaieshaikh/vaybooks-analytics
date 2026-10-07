@@ -76,8 +76,10 @@ def _followup_name(prefix, group):
     return (prefix + cleaned[:max_group])[:31]
 
 
-def _is_numeric_header(header):
-    return header not in TEXT_HEADERS and header not in ("", None)
+def _is_numeric_header(header, extra_text=None):
+    if header in ("", None) or header in TEXT_HEADERS:
+        return False
+    return header not in (extra_text or ())
 
 
 def write_workbook(reports):
@@ -126,12 +128,13 @@ def write_workbook(reports):
         if report.get("total"):
             body.append(report["total"])
         headers = report["headers"]
+        extra_text = set(report.get("text_headers") or [])
         for row in body:
             for c, val in enumerate(row, 1):
                 header = headers[c - 1] if c - 1 < len(headers) else ""
                 cell = ws.cell(r, c, val if val != "" else None)
                 cell.border = thin
-                if val != "" and val is not None and _is_numeric_header(header):
+                if val != "" and val is not None and _is_numeric_header(header, extra_text):
                     try:
                         num = number_(val) if not isinstance(val, (int, float)) else float(val)
                         cell.value = round2(num)

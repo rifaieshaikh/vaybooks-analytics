@@ -234,6 +234,35 @@ def api_customer_pdf(uk: str, request: Request, user=Depends(require_user)):
     return Response(content=data, media_type="application/pdf", headers={"Content-Disposition": "attachment; filename=%s" % filename})
 
 
+@router.get("/api/customers/{uk}/xlsx")
+def api_customer_xlsx(uk: str, request: Request, user=Depends(require_user)):
+    assert_perm(user, "customer.view")
+    store = get_store()
+    params = dict(request.query_params)
+    _run, views, _stale = views_for_request(store, params)
+    detail = snapshot_get_customer(store, uk, views)
+    if not detail:
+        raise HTTPException(404, "Not found")
+    from server.collection import reminder_context
+    from server.org_policy import get_org_policy
+    from server.sales_exports import statement_reports, workbook_bytes
+    policy = get_org_policy(store)
+    detail = dict(detail)
+    detail["company_name"] = policy.get("company_name") or ""
+    detail["currency_code"] = policy.get("currency_code") or ""
+    detail["currency_symbol"] = policy.get("currency_symbol") or ""
+    detail["collection_reminder"] = reminder_context(store, detail.get("name") or "")
+    data = workbook_bytes(statement_reports(detail))
+    as_of = (detail.get("as_of") or "").replace("-", "")
+    raw_name = "".join(ch if ch.isalnum() else "_" for ch in (detail.get("name") or "customer"))
+    filename = "%s_statement_%s.xlsx" % (raw_name.strip("_") or "customer", as_of or "today")
+    return Response(
+        content=data,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=%s" % filename},
+    )
+
+
 def _entity_pdf_response(entity, detail):
     data = entity_brief_pdf(detail, entity=entity)
     as_of = (detail.get("as_of") or "").replace("-", "")

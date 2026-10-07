@@ -35,14 +35,21 @@ def rate_limit_per_minute():
         return 600
 
 
+DESKTOP_PRICE = "Included with this install"
+DESKTOP_RENEWAL_NOTE = "This desktop install does not expire and has no renewal date."
+HOSTED_PRICE = "Not part of the desktop offer. Packs follow saved entitlements."
+HOSTED_RENEWAL_NOTE = "No expiry date. A pack stays on only while its entitlement is on. Turning it off keeps customer records."
+
+
 def license_view(store):
-    """What this install can show before a commercial policy exists."""
+    """Commercial rules from docs/release/commercial-policy.md."""
     from server.org_policy import get_org_policy
     policy = get_org_policy(store)
     hosted = hosted_mode()
     return {
         "hosted": hosted,
         "mode": "hosted" if hosted else "local",
+        "status": "active",
         "message": "Hosted install. Packs follow the saved entitlements." if hosted else "Local install. Every pack is enabled.",
         "packs": {
             "wholesale": pack_enabled(store, "wholesale"),
@@ -51,8 +58,10 @@ def license_view(store):
         "company_name": policy.get("company_name") or "",
         "version": (os.environ.get("VAY_VERSION") or "dev").strip() or "dev",
         "support_contact": (os.environ.get("VAY_SUPPORT_CONTACT") or "").strip(),
+        "price": HOSTED_PRICE if hosted else DESKTOP_PRICE,
         "renewal": None,
-        "renewal_note": "Trial, renewal, and expiry stay unset until a commercial policy is written.",
+        "expires": None,
+        "renewal_note": HOSTED_RENEWAL_NOTE if hosted else DESKTOP_RENEWAL_NOTE,
     }
 
 
