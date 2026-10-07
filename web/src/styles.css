@@ -1345,6 +1345,20 @@ button.dash-tile .value { font-size: 22px; font-weight: 750; margin-top: 4px; }
   }
   .wizard-step-label { display: none; }
   .wizard-step.current .wizard-step-label { display: inline; }
+  .follow-modal,
+  .assign-modal {
+    width: calc(100vw - 24px);
+    max-height: calc(100vh - 24px);
+    overflow: auto;
+  }
+  .assign-form {
+    grid-template-columns: 1fr;
+  }
+  .follow-toolbar button,
+  .assign-modal button,
+  .analytics-item button {
+    min-height: 44px;
+  }
 }
 .preview-table { max-height: 280px; }
 

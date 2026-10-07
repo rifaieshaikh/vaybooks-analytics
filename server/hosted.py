@@ -35,6 +35,41 @@ def rate_limit_per_minute():
         return 600
 
 
+def license_view(store):
+    """What this install can show before a commercial policy exists."""
+    from server.org_policy import get_org_policy
+    policy = get_org_policy(store)
+    hosted = hosted_mode()
+    return {
+        "hosted": hosted,
+        "mode": "hosted" if hosted else "local",
+        "message": "Hosted install. Packs follow the saved entitlements." if hosted else "Local install. Every pack is enabled.",
+        "packs": {
+            "wholesale": pack_enabled(store, "wholesale"),
+            "retail": pack_enabled(store, "retail"),
+        },
+        "company_name": policy.get("company_name") or "",
+        "version": (os.environ.get("VAY_VERSION") or "dev").strip() or "dev",
+        "support_contact": (os.environ.get("VAY_SUPPORT_CONTACT") or "").strip(),
+        "renewal": None,
+        "renewal_note": "Trial, renewal, and expiry stay unset until a commercial policy is written.",
+    }
+
+
+def diagnostics_view(store):
+    """Support bundle without credentials."""
+    counts = {}
+    for row in store.list_rows() or []:
+        kind = row.get("type") or ""
+        if kind in ("user", "session"):
+            continue
+        counts[kind] = counts.get(kind, 0) + 1
+    view = license_view(store)
+    view["row_counts"] = counts
+    view["uploads"] = sum(1 for item in (store.list_uploads() or []) if not item.get("dry_run"))
+    return view
+
+
 def pack_enabled(store, pack):
     """Desktop can adopt a pack. A hosted tenant needs the entitlement turned on."""
     if not hosted_mode():

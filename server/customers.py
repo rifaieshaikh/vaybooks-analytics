@@ -2938,6 +2938,17 @@ def money(n):
         return "0.00"
 
 
+def stated_money(detail, amount):
+    symbol = str((detail or {}).get("currency_symbol") or "").strip()
+    text = money(amount)
+    code = str((detail or {}).get("currency_code") or "").strip()
+    if symbol:
+        return symbol + text
+    if code:
+        return code + " " + text
+    return text
+
+
 def _pdf_family(pdf):
     pairs = [
         (r"C:\Windows\Fonts\Nirmala.ttf", r"C:\Windows\Fonts\NirmalaB.ttf"),
@@ -3055,9 +3066,10 @@ def _pdf_kpi_row(pdf, family, cells):
 
 
 def _customer_statement_pdf(pdf, family, detail):
+    company = (detail.get("company_name") or "").strip()
     _pdf_header(
         pdf, family,
-        "Vay  ·  Account statement",
+        (company + "  ·  Account statement") if company else "Account statement",
         detail.get("as_of_label") or "",
         fill=(15, 61, 46),
     )
@@ -3066,7 +3078,7 @@ def _customer_statement_pdf(pdf, family, detail):
         _pdf_line(pdf, family, detail.get("group") or "", 10, False, 5, (120, 113, 108))
     due_label = "Advance" if detail.get("credit") else "Amount due"
     due_value = abs(detail.get("due") or 0) if detail.get("credit") else detail.get("due")
-    _pdf_line(pdf, family, "%s  %s" % (due_label, money(due_value)), 16, True, 9)
+    _pdf_line(pdf, family, "%s  %s" % (due_label, stated_money(detail, due_value)), 16, True, 9)
     waiting = detail.get("invoices_waiting")
     if waiting:
         _pdf_line(pdf, family, "%s open invoice%s" % (waiting, "" if waiting == 1 else "s"), 10, False, 5, (120, 113, 108))
@@ -3108,16 +3120,16 @@ def _collection_reminder_pdf(pdf, family, detail):
     _pdf_line(pdf, family, "Payment reminder", 12, True, 7)
     due_label = "Advance" if detail.get("credit") else "Amount due"
     due_value = abs(detail.get("due") or 0) if detail.get("credit") else detail.get("due")
-    _pdf_line(pdf, family, "%s  %s" % (due_label, money(due_value)), 11, True, 6)
+    _pdf_line(pdf, family, "%s  %s" % (due_label, stated_money(detail, due_value)), 11, True, 6)
     promises = reminder.get("promises") or []
     if promises:
         _pdf_table(
             pdf, family,
             ["Promised", "Date", "Remaining", "Status"],
             [[
-                money(row.get("amount")),
+                stated_money(detail, row.get("amount")),
                 row.get("promised_on") or "",
-                money(row.get("remaining")),
+                stated_money(detail, row.get("remaining")),
                 row.get("message") or (row.get("payment_status") or "").replace("_", " "),
             ] for row in promises[:8]],
             [40, 36, 40, 62],

@@ -28,6 +28,41 @@ import { profitRan } from "./reportUtils";
 import { hashReset, hashSet } from "./format";
 import "./styles.css";
 
+function DemoCard({ user, onOpened }) {
+  const [status, setStatus] = useState(null);
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (!can(user, "reports.create")) return;
+    api.demoStatus().then(setStatus).catch(() => setStatus(null));
+  }, [user]);
+  if (!can(user, "reports.create") || !status || status.blocked) return null;
+  async function open() {
+    setBusy(true);
+    setErr("");
+    try {
+      const next = await api.openDemo();
+      setStatus(next);
+      if (onOpened) onOpened(next.report_id || next.report?.id);
+    } catch (e) {
+      setErr(e.message || "Could not open the demo");
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="card">
+      <h3>Sample company</h3>
+      <p className="muted">Open Vay Demo Traders without preparing an import. Reset replaces only the sample rows.</p>
+      <ul>
+        {(status.scenarios || []).map((row) => <li key={row.id}>{row.name}: {row.summary}</li>)}
+      </ul>
+      {err ? <p className="err">{err}</p> : null}
+      <button type="button" disabled={busy} onClick={open}>{status.present ? "Reset sample" : "Open sample"}</button>
+    </div>
+  );
+}
+
 function createProgressLabel(run) {
   const progress = run?.generate_progress;
   const steps = progress?.steps || [];
@@ -334,6 +369,7 @@ export default function App() {
         </header>
         <main className="content">
           <SetupWizard user={user} onGo={go} />
+          <DemoCard user={user} onOpened={loadRuns} />
           {item?.kind === "home" ? (
             <DashboardPage
               user={user}

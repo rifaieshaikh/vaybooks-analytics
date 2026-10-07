@@ -132,6 +132,7 @@ def get_org_policy(store):
         "timezone": (fields.get("Timezone") or fields.get("timezone") or defaults["timezone"]).strip() or DEFAULT_TIMEZONE,
         "currency_code": (fields.get("CurrencyCode") or fields.get("currency_code") or defaults["currency_code"]).strip() or "INR",
         "currency_symbol": (fields.get("CurrencySymbol") or fields.get("currency_symbol") or defaults["currency_symbol"]) or "₹",
+        "company_name": (fields.get("CompanyName") or fields.get("company_name") or "").strip(),
         "sales_tax_inclusive_rate": tax,
         "ar_balance_tolerance": tolerance,
         "expense_pack": (fields.get("ExpensePack") or fields.get("expense_pack") or DEFAULT_EXPENSE_PACK).strip() or DEFAULT_EXPENSE_PACK,
@@ -201,12 +202,17 @@ def save_org_policy(store, body):
     if currency_symbol is None:
         currency_symbol = current["currency_symbol"]
     currency_symbol = str(currency_symbol) if currency_symbol is not None else "₹"
+    if body.get("company_name") is None:
+        company_name = current.get("company_name") or ""
+    else:
+        company_name = str(body.get("company_name") or "").strip()
     expense_pack = (body.get("expense_pack") or current["expense_pack"] or DEFAULT_EXPENSE_PACK).strip() or DEFAULT_EXPENSE_PACK
     fields = {
         "FiscalYearStartMonth": str(fy),
         "Timezone": timezone,
         "CurrencyCode": currency_code,
         "CurrencySymbol": currency_symbol,
+        "CompanyName": company_name,
         "SalesTaxInclusiveRate": str(tax),
         "ArBalanceTolerance": str(tolerance),
         "ExpensePack": expense_pack,

@@ -140,6 +140,8 @@ def _line_from_plan(plan, edit, manual):
         "unit_cost": cost,
         "cost_label": plan.get("cost_label") or ("Uncosted" if cost in ("", None) else "Snapshot cost"),
         "discontinued": bool(plan.get("discontinued")),
+        "uses_position": plan.get("position") not in ("", None),
+        "quantity_reason": plan.get("reason") or "",
     }
 
 
@@ -162,7 +164,21 @@ def _demand_label(plans):
     return "Demand window up to %s days" % max(windows)
 
 
-def build_reorder(plans, proposal):
+def item_pack_rules(store):
+    """Pack size and order minimum stored on the stock item, when present."""
+    rules = {}
+    for doc in store.rows_of_type("stock") or []:
+        fields = doc.get("fields") or {}
+        name = str(fields.get("Item Name") or "").strip().lower()
+        if not name:
+            continue
+        pack = _num(fields.get("Pack Size") if fields.get("Pack Size") not in ("", None) else fields.get("Pack"))
+        minimum = _num(fields.get("Order Minimum") if fields.get("Order Minimum") not in ("", None) else fields.get("Minimum"))
+        rules[name] = {"pack_size": pack or 0, "minimum": minimum or 0}
+    return rules
+
+
+def build_reorder(plans, proposal, packs=None):
     """Draft a reorder from Item 360 buy quantities.
 
     An unedited quantity is that buy_qty, then pack and minimum when it is positive.
@@ -187,7 +203,12 @@ def build_reorder(plans, proposal):
         if not key or key in seen:
             continue
         seen.add(key)
-        edit = edits.get(key) or {}
+        edit = dict(edits.get(key) or {})
+        rule = (packs or {}).get(key) or {}
+        if not edit.get("pack_size") and rule.get("pack_size"):
+            edit["pack_size"] = rule["pack_size"]
+        if not edit.get("minimum") and rule.get("minimum"):
+            edit["minimum"] = rule["minimum"]
         manual = _is_manual(edit)
         base = float(plan.get("buy_qty") or 0)
         discontinued = bool(plan.get("discontinued"))

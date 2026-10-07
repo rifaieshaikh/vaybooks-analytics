@@ -446,6 +446,7 @@ def _result_row(action):
         "subject_name": action.get("subject_name") or "",
         "status": action.get("status") or "",
         "due_date": action.get("due_date") or "",
+        "owner": action.get("owner") or "",
         "label": outcome.get("label") or "",
         "verified_amount": outcome.get("verified_amount"),
         "observed_amount": outcome.get("observed_amount") if "observed_amount" in outcome else outcome.get("amount"),
@@ -455,11 +456,58 @@ def _result_row(action):
     }
 
 
+def _results_by_owner(actions, as_of):
+    buckets = {}
+    for row in actions or []:
+        owner = row.get("owner") or "Unassigned"
+        bucket = buckets.setdefault(owner, {"owner": owner, "open": 0, "overdue": 0, "allocated": 0.0})
+        if row.get("status") != "open":
+            continue
+        bucket["open"] += 1
+        if row.get("due_date") and row["due_date"] < as_of:
+            bucket["overdue"] += 1
+        verified = (row.get("outcome") or {}).get("verified_amount")
+        if verified:
+            bucket["allocated"] = round(bucket["allocated"] + float(verified), 2)
+    return [buckets[key] for key in sorted(buckets)]
+
+
+def _sales_after_contact(store, contacts):
+    """Customers who bought again after a recorded contact. This does not claim the contact caused the sale."""
+    sales = []
+    for doc in store.rows_of_type("sales") or []:
+        fields = doc.get("fields") or {}
+        name = clean_text(fields.get("Party Name") or fields.get("Account Name"))
+        day = str(fields.get("Date") or "")[:10]
+        if name and day:
+            sales.append((name.lower(), name, day, fields.get("Net Amount") or fields.get("Amount"), doc.get("uk") or ""))
+    found = []
+    seen = set()
+    for contact in contacts or []:
+        name = clean_text(contact.get("customer_name"))
+        when = str(contact.get("contacted_on") or "")[:10]
+        if not name or not when:
+            continue
+        for key, label, day, amount, uk in sales:
+            token = (key, uk or day)
+            if key == name.lower() and day > when and token not in seen:
+                seen.add(token)
+                found.append({
+                    "customer": label,
+                    "contacted_on": when,
+                    "sale_date": day,
+                    "amount": amount,
+                    "source_uk": uk,
+                })
+    return found[:20]
+
+
 def build_results(store, actions, scope, report_date, run, opens):
     """Derived review summary. It does not claim an action caused a payment or a sale."""
     reps = _rep_map(store)
     scoped = _scoped_actions(actions, scope, reps)
-    as_of = today_ist().strftime("%Y-%m-%d")
+    from server.org_policy import get_org_policy
+    as_of = today_ist(get_org_policy(store).get("timezone")).strftime("%Y-%m-%d")
     _today, contacts, promises, _disputes = _bundle(store, as_of)
     open_rows = [row for row in scoped if row.get("status") == "open"]
     overdue = [row for row in open_rows if row.get("due_date") and row["due_date"] < as_of]
@@ -490,6 +538,9 @@ def build_results(store, actions, scope, report_date, run, opens):
         "review_opened_at": latest,
         "refreshed_at": str((run or {}).get("finished_at") or ""),
         "rows": [_result_row(row) for row in scoped],
+        "by_owner": _results_by_owner(scoped, as_of),
+        "recovery": _sales_after_contact(store, contacts),
+        "attribution": "Allocated receipts are counted on one task. Received since assigned is observed, not proof that the task caused the payment.",
     }
 
 

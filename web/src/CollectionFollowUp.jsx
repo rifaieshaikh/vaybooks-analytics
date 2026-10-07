@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { api } from "./api";
+import ReminderDraft from "./ReminderDraft";
 import { money } from "./format";
 
 const ENTRY_TYPES = [
@@ -150,6 +151,8 @@ export default function CollectionFollowUp({ customerName, customerUk, invoices,
   const [disputeInvoices, setDisputeInvoices] = useState([]);
   const [disputeOther, setDisputeOther] = useState("");
   const [openInvoices, setOpenInvoices] = useState([]);
+  const [preview, setPreview] = useState(false);
+  const [payAmounts, setPayAmounts] = useState({});
 
   function load() {
     if (!customerName) return;
@@ -323,9 +326,7 @@ export default function CollectionFollowUp({ customerName, customerUk, invoices,
     <div className="stack">
       {err ? <p className="err">{err}</p> : null}
       <div className="follow-toolbar">
-        {onReminder ? (
-          <button type="button" className="ghost" onClick={onReminder}>Download reminder</button>
-        ) : null}
+        <button type="button" className="ghost" onClick={() => setPreview(true)}>Review reminder</button>
         {canManage ? (
           <button type="button" onClick={() => openComposer("add")}>Add</button>
         ) : null}
@@ -340,6 +341,7 @@ export default function CollectionFollowUp({ customerName, customerUk, invoices,
             aria-labelledby="follow-composer-title"
             onClick={(event) => event.stopPropagation()}
             onSubmit={saveEntry}
+            aria-busy={busy}
           >
             <h3 id="follow-composer-title">{entryTitle(composer, entryType)}</h3>
             <p className="muted">{customerName}</p>
@@ -482,7 +484,7 @@ export default function CollectionFollowUp({ customerName, customerUk, invoices,
                         <>
                           <div>{money(item.row.amount)} promised {item.row.promised_on} · By {item.row.staff || item.row.created_by || "—"}{item.row.invoice_refs?.length ? " · " + item.row.invoice_refs.join(", ") : ""}</div>
                           <div className="muted">
-                            {money(item.row.remaining)} remaining
+                            {money(item.row.allocated)} confirmed · {money(item.row.remaining)} remaining
                             {item.row.receipt_coverage_through ? " · Receipts through " + item.row.receipt_coverage_through : ""}
                           </div>
                           {item.row.message ? <div className="muted">{item.row.message}</div> : null}
@@ -502,18 +504,34 @@ export default function CollectionFollowUp({ customerName, customerUk, invoices,
                               {suggestion.label} {money(suggestion.unused)}
                               {suggestion.date ? " on " + suggestion.date : ""}
                               {canManage ? (
-                                <button
-                                  type="button"
-                                  className="secondary"
-                                  disabled={busy}
-                                  onClick={() => run(() => api.confirmCollectionAllocation({
-                                    promise_id: item.row.id,
-                                    source_uk: suggestion.source_uk,
-                                    source_type: suggestion.source_type,
-                                  }))}
-                                >
-                                  Confirm
-                                </button>
+                                <>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    step="0.01"
+                                    aria-label="Amount to confirm"
+                                    value={payAmounts[suggestion.source_uk] ?? ""}
+                                    placeholder={suggestion.unused != null ? String(suggestion.unused) : ""}
+                                    onChange={(e) => setPayAmounts((prev) => ({ ...prev, [suggestion.source_uk]: e.target.value }))}
+                                  />
+                                  <button
+                                    type="button"
+                                    className="secondary"
+                                    disabled={busy}
+                                    onClick={() => {
+                                      const typed = payAmounts[suggestion.source_uk];
+                                      const body = {
+                                        promise_id: item.row.id,
+                                        source_uk: suggestion.source_uk,
+                                        source_type: suggestion.source_type,
+                                      };
+                                      if (typed !== undefined && String(typed) !== "") body.amount = Number(typed);
+                                      return run(() => api.confirmCollectionAllocation(body));
+                                    }}
+                                  >
+                                    Confirm
+                                  </button>
+                                </>
                               ) : null}
                             </div>
                           ))}
@@ -555,6 +573,14 @@ export default function CollectionFollowUp({ customerName, customerUk, invoices,
           </div>
         </div>
       )}
+      {preview ? (
+        <ReminderDraft
+          customerName={customerName}
+          onClose={() => setPreview(false)}
+          onDownload={() => onReminder && onReminder()}
+        />
+      ) : null}
+      {busy ? <p className="warn">Saving…</p> : null}
     </div>
   );
 }

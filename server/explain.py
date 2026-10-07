@@ -390,6 +390,22 @@ def annotate_today(store, payload, perms):
             "mixed_coverage": mixed,
             "coverage_note": note,
         }
+        row["explanation"] = {
+            "id": "work:%s" % (row.get("id") or row.get("customer") or ""),
+            "label": row.get("reason") or "Today",
+            "formula": row.get("reason") or "Shown from the latest follow-up and balances.",
+            "basis": "live",
+            "value": row.get("credit", {}).get("balance") if row.get("amount") is None else row.get("amount"),
+            "status": "available",
+            "window": {
+                "to": row.get("data_date") or payload.get("as_of") or "",
+                "report_date": row.get("data_date") or "",
+            },
+            "sources": sources,
+            "mixed_coverage": mixed,
+            "coverage_note": note,
+            "inputs": ["balance", "overdue"] if row.get("credit") else [],
+        }
     return payload
 
 
@@ -432,17 +448,30 @@ def annotate_reorder(built, store, perms):
         for _label, _day, type_name in visible:
             if type_name not in types:
                 types.append(type_name)
+        formula = line.get("formula") or (
+            "Suggested quantity starts from the holding buy quantity, "
+            "then pack and minimum apply only when that quantity is positive."
+        )
+        inputs = [item for item in (line.get("inputs") or []) if item]
+        if not inputs:
+            inputs = ["selling pace", "dated stock", "holding target"]
+            if line.get("uses_position"):
+                inputs.extend(["reservations", "incoming stock"])
         line["explanation"] = {
             "id": "reorder:%s" % name,
+            "label": "Suggested quantity",
+            "formula": formula,
             "basis": "live",
             "label_kind": kind,
             "value": None if missing else cost,
             "status": "unavailable" if missing else "available",
-            "reason": "Missing purchase cost" if missing else "",
+            "reason": "Missing purchase cost" if missing else (line.get("quantity_reason") or ""),
             "items_coverage": items_date if can_see_source(perms, "items") else "",
             "stock_date": stock_date if can_see_source(perms, "stock") else "",
             "sources": live_sources(store, types, perms),
             "mixed_coverage": mixed,
             "coverage_note": note,
+            "window": {"to": stock_date, "report_date": stock_date},
+            "inputs": inputs,
         }
     return built

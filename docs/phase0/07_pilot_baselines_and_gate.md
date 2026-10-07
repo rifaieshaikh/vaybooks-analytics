@@ -38,8 +38,22 @@ Recorded values: **not set**. Edge Point, Plymax, and EFF YES Traders still have
 
 Edge Point, Plymax, and EFF YES Traders are onboarded through the **shared canonical model + mappers + org policy**, not by adding `vay/reports/edge_point.py`-style modules. Outstanding work is **sample collection**, not model forks.
 
+## International intake (G01–G02)
+
+Separate from the Phase 0 gate above. GCC, the European Union, and the Americas are a search list in [`../global-support-matrix.md`](../global-support-matrix.md). No overseas candidate has been named, and no overseas dataset has been received.
+
+Copy [`samples/_overseas_intake/MANIFEST.md`](samples/_overseas_intake/MANIFEST.md) when a business is named. Record native headers in that copy. Record these measures only from a real onboarding, and leave them unset until then:
+
+| Measure | How to capture | Recorded value |
+|---|---|---|
+| Time to first reconciled report | Start at first upload; stop when a decision-maker views a reconciled sales and AR view | not set |
+| Control-total agreement | Compare sales, receipts, and AR to the manifest totals, including period, net or gross, and whether tax is included | not set |
+| Locale parsing exceptions | Dates and numbers the selected source format rejected or left ambiguous | not set |
+| Currency and tax coverage | Currency, precision, and tax basis present in the files versus what the report could use | not set |
+
 ## Related docs
 
+- [`../global-support-matrix.md`](../global-support-matrix.md)
 - [`01_buyer_and_pilots.md`](01_buyer_and_pilots.md)
 - [`02_vay_assumption_catalogue.md`](02_vay_assumption_catalogue.md)
 - [`06_org_policy_and_terminology.md`](06_org_policy_and_terminology.md)

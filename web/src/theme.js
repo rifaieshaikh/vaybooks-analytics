@@ -191,6 +191,7 @@ export const NAV = [
     items: [
       { id: "network", label: "Network", kind: "settings", section: "network", perm: "__home__" },
       { id: "organization", label: "Organization", kind: "settings", section: "organization", perm: "settings.advanced" },
+      { id: "license", label: "Plan and support", kind: "settings", section: "license", perm: "settings.advanced" },
       { id: "account-names", label: "Account migrations", kind: "settings", section: "account-names", perm: "settings.advanced" },
       { id: "settlement", label: "Settlement", kind: "settings", section: "settlement", perm: "settings.advanced" },
       { id: "due-days", label: "Due days", kind: "settings", section: "due-days", perm: "settings.advanced" },

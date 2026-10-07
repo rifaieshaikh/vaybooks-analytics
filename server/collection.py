@@ -29,12 +29,21 @@ def _now():
     return datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
 
 
-def _today(as_of=None):
+def _today(as_of=None, store=None):
     if as_of:
         parsed = parse_date(str(as_of)[:10])
         if parsed:
             return parsed.strftime("%Y-%m-%d")
-    return today_ist().strftime("%Y-%m-%d")
+    timezone = None
+    if store is not None:
+        from server.org_policy import get_org_policy
+        timezone = (get_org_policy(store) or {}).get("timezone")
+    return today_ist(timezone).strftime("%Y-%m-%d")
+
+
+def _audit(store, action, username, detail):
+    from server.audit import record
+    record(store, action, username or "", detail)
 
 
 def _iso_date(value):
@@ -540,7 +549,7 @@ def _dispute_view(row):
 
 
 def _bundle(store, as_of=None):
-    today = _today(as_of)
+    today = _today(as_of, store)
     sources = sync_allocations(store)
     allocs = _rows(store, ALLOCATION_TYPE)
     promises = [
@@ -578,8 +587,12 @@ def follow_up_queues(store, as_of=None):
     due.sort(key=lambda row: (row.get("next_follow_up") or "", _key(row.get("customer_name"))))
     missed = [row for row in promises if row.get("payment_status") == "missed"]
     pending = [row for row in promises if row.get("payment_status") == "pending_refresh"]
+    from server.org_policy import get_org_policy
+    policy = get_org_policy(store)
     return {
         "as_of": today,
+        "currency_code": policy.get("currency_code") or "",
+        "currency_symbol": policy.get("currency_symbol") or "",
         "due_follow_ups": due,
         "missed_promises": missed,
         "pending_refresh": pending,
@@ -602,11 +615,17 @@ def reminder_context(store, customer_name, as_of=None):
             next_follow_up = when
             if row.get("next_step"):
                 next_step = row["next_step"]
+    from server.org_policy import get_org_policy
+    policy = get_org_policy(store)
     return {
         "customer_name": payload["customer_name"],
         "promises": open_promises,
         "next_step": next_step,
         "next_follow_up": next_follow_up,
+        "currency_code": policy.get("currency_code") or "",
+        "currency_symbol": policy.get("currency_symbol") or "",
+        "company_name": policy.get("company_name") or "",
+        "as_of": _today(as_of, store),
     }
 
 
@@ -676,6 +695,7 @@ def create_contact(store, body, username):
     }
     _save(store, CONTACT_TYPE, uk, fields)
     fields["id"] = uk
+    _audit(store, "collection_contact", username, "Create contact %s" % name)
     return _contact_view(fields)
 
 
@@ -708,6 +728,7 @@ def update_contact(store, contact_id, body, username):
     row["updated_by"] = username or ""
     row["updated_at"] = _now()
     _save(store, CONTACT_TYPE, row["id"], row)
+    _audit(store, "collection_contact", username, "Update contact %s" % (row.get("customer_name") or contact_id))
     return _contact_view(row)
 
 
@@ -733,6 +754,7 @@ def create_promise(store, body, username):
         "updated_at": stamp,
     }
     _save(store, PROMISE_TYPE, uk, fields)
+    _audit(store, "collection_promise", username, "Create promise %s" % name)
     payload = customer_follow_up(store, name)
     for row in payload["promises"]:
         if row["id"] == uk:
@@ -770,6 +792,7 @@ def update_promise(store, promise_id, body, username):
     row["updated_by"] = username or ""
     row["updated_at"] = _now()
     _save(store, PROMISE_TYPE, row["id"], row)
+    _audit(store, "collection_promise", username, "Update promise %s" % (row.get("customer_name") or promise_id))
     payload = customer_follow_up(store, row.get("customer_name"))
     for item in payload["promises"]:
         if item["id"] == promise_id:
@@ -798,7 +821,7 @@ def create_dispute(store, body, username):
         "invoice_refs": _refs(body.get("invoice_refs")),
         "note": note,
         "status": status,
-        "opened_on": _optional_date(body.get("opened_on"), "opened_on") or _today(),
+        "opened_on": _optional_date(body.get("opened_on"), "opened_on") or _today(store=store),
         "staff": clean_text(body.get("staff")) or (username or ""),
         "created_by": username or "",
         "created_at": stamp,
@@ -807,6 +830,7 @@ def create_dispute(store, body, username):
     }
     _save(store, DISPUTE_TYPE, uk, fields)
     fields["id"] = uk
+    _audit(store, "collection_dispute", username, "Create dispute %s" % name)
     return _dispute_view(fields)
 
 
@@ -843,6 +867,7 @@ def update_dispute(store, dispute_id, body, username):
     row["updated_by"] = username or ""
     row["updated_at"] = _now()
     _save(store, DISPUTE_TYPE, row["id"], row)
+    _audit(store, "collection_dispute", username, "Update dispute %s" % (row.get("customer_name") or dispute_id))
     return _dispute_view(row)
 
 
@@ -893,6 +918,7 @@ def confirm_allocation(store, body, username):
         "updated_at": stamp,
     }
     _save(store, ALLOCATION_TYPE, uk, fields)
+    _audit(store, "collection_allocation", username, "Confirm allocation %s" % (promise.get("customer_name") or ""))
     payload = customer_follow_up(store, promise.get("customer_name"))
     for row in payload["promises"]:
         if row["id"] == promise["id"]:
@@ -911,6 +937,7 @@ def clear_allocation(store, allocation_id, username):
     promise = _find(_rows(store, PROMISE_TYPE), row.get("promise_id") or "")
     _void(row, username or "", "cleared")
     _save(store, ALLOCATION_TYPE, row["id"], row)
+    _audit(store, "collection_allocation", username, "Clear allocation %s" % allocation_id)
     if not promise:
         return {"id": allocation_id, "voided_at": row.get("voided_at")}
     payload = customer_follow_up(store, promise.get("customer_name"))

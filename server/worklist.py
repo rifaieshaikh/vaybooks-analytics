@@ -10,16 +10,18 @@ from server.collection import PENDING_MESSAGE, follow_up_queues
 
 ORDER_RULE = (
     "Blocked credit, then missed promises, then due follow-ups, "
-    "then repurchase days past the usual gap, then inactive accounts."
+    "then stock attention, then repurchase days past the usual gap, then inactive accounts."
 )
+STOCK_CAP = 5
 EMPTY_REPS_MESSAGE = "Ask an admin to assign sales reps."
 
 _KIND_RANK = {
     "missed_promise": 1,
     "pending_refresh": 2,
     "follow_up": 3,
-    "repurchase": 4,
-    "inactive": 5,
+    "stock": 4,
+    "repurchase": 5,
+    "inactive": 6,
 }
 
 
@@ -59,6 +61,7 @@ def resolve_scope(store, user, staff=""):
             "reps": _reps_of(target),
             "mode": "staff",
             "staff": target.get("username") or staff,
+            "username": target.get("username") or staff,
             "can_pick_staff": True,
             "message": "" if _reps_of(target) else EMPTY_REPS_MESSAGE,
         }
@@ -67,6 +70,7 @@ def resolve_scope(store, user, staff=""):
             "reps": own,
             "mode": "self",
             "staff": "",
+            "username": (user or {}).get("username") or "",
             "can_pick_staff": False,
             "message": "",
         }
@@ -161,6 +165,28 @@ def _profile(directory, reps, customer):
     return profile, salesperson
 
 
+def customers_in_scope(store, user):
+    """Customer-name keys a field rep may see. None means the caller is not limited to assigned reps."""
+    scope = resolve_scope(store, user, "")
+    if scope.get("mode") not in ("self", "staff"):
+        return None
+    directory = _directory(store)
+    reps = _rep_map(store)
+    allowed = set()
+    for name, rep in reps.items():
+        _profile, salesperson = _profile(directory, reps, name)
+        if _allowed(scope, salesperson or rep):
+            allowed.add(name)
+    return allowed
+
+
+def customer_in_scope(store, user, customer_name):
+    allowed = customers_in_scope(store, user)
+    if allowed is None:
+        return True
+    return _key(customer_name) in allowed
+
+
 def _allowed(scope, salesperson):
     reps = scope.get("reps")
     if reps is None:
@@ -191,6 +217,8 @@ def _follow_rows(store, scope, directory, reps, today):
         )
         row["credit"] = _credit(profile)
         row["next_step"] = contact.get("next_step") or ""
+        row["due_date"] = contact.get("next_follow_up") or ""
+        row["owner"] = contact.get("staff") or ""
         rows.append(row)
     for promise in queues.get("missed_promises") or []:
         customer = promise.get("customer_name") or ""
@@ -207,6 +235,8 @@ def _follow_rows(store, scope, directory, reps, today):
             promise.get("id") or customer,
         )
         row["credit"] = _credit(profile)
+        row["due_date"] = promise.get("promised_on") or ""
+        row["owner"] = promise.get("staff") or ""
         _observed(row, promise.get("remaining"))
         rows.append(row)
     for promise in queues.get("pending_refresh") or []:
@@ -224,6 +254,8 @@ def _follow_rows(store, scope, directory, reps, today):
             promise.get("id") or customer,
         )
         row["credit"] = _credit(profile)
+        row["due_date"] = promise.get("promised_on") or ""
+        row["owner"] = promise.get("staff") or ""
         _observed(row, promise.get("remaining"))
         rows.append(row)
     return rows, today
@@ -268,6 +300,8 @@ def _attach_actions(rows, store, scope, directory, reps, today):
         )
         row["credit"] = _credit(profile)
         row["action_id"] = action.get("id") or ""
+        row["due_date"] = action.get("due_date") or ""
+        row["owner"] = action.get("owner") or ""
         _observed(row, action.get("amount"))
         rows.append(row)
     return rows
@@ -407,6 +441,106 @@ def _apply_credit(store, rows):
         row["next_step"] = step
 
 
+def _stock_rows(store, scope, today):
+    """Assigned purchase actions, then a short list of urgent items."""
+    rows = []
+    seen = set()
+    for action in list_action_rows(store):
+        if action.get("status") != "open" or action.get("action_type") != "purchase":
+            continue
+        if scope.get("reps") == []:
+            continue
+        limit = scope.get("username") or ""
+        if scope.get("mode") in ("self", "staff") and limit:
+            if (action.get("owner") or "") != limit:
+                continue
+        item = action.get("subject_name") or ""
+        if not item:
+            continue
+        key = _key(item)
+        seen.add(key)
+        row = _blank(
+            "stock",
+            item,
+            action.get("owner") or "",
+            action.get("proposal") or "Stock attention",
+            _age(action.get("due_date"), today),
+            today,
+            item,
+        )
+        row["action_id"] = action.get("id") or ""
+        row["due_date"] = action.get("due_date") or ""
+        row["owner"] = action.get("owner") or ""
+        row["products"] = [item]
+        row["evidence"] = {"kind": "item", "name": item}
+        _observed(row, action.get("amount"))
+        rows.append(row)
+        if len(rows) >= STOCK_CAP:
+            return rows
+    if scope.get("mode") in ("self", "staff"):
+        return rows
+    on_hand = _on_hand(store)
+    urgent = []
+    for doc in store.rows_of_type("stock") or []:
+        fields = doc.get("fields") or {}
+        item = clean_text(fields.get("Item Name"))
+        key = _key(item)
+        if not item or key in seen:
+            continue
+        usual = _usual_qty(store, item)
+        qty = on_hand.get(key, 0.0)
+        if usual <= 0 or qty >= usual:
+            continue
+        urgent.append((usual - qty, item, qty))
+    urgent.sort(key=lambda item: (-item[0], _key(item[1])))
+    for _gap, item, qty in urgent:
+        if len(rows) >= STOCK_CAP:
+            break
+        row = _blank(
+            "stock",
+            item,
+            "",
+            "On hand is below the latest selling quantity",
+            0,
+            today,
+            item,
+        )
+        row["products"] = [item]
+        row["evidence"] = {"kind": "item", "name": item}
+        row["value_kind"] = "observed"
+        row["amount"] = round(qty, 2)
+        rows.append(row)
+    return rows
+
+
+def _collapse(rows):
+    kept = []
+    index = {}
+    for row in rows:
+        subject = row.get("subject") or row.get("customer") or ""
+        key = (row.get("kind") or "", _key(subject))
+        slot = index.get(key)
+        if slot is None:
+            index[key] = len(kept)
+            kept.append(row)
+            continue
+        current = kept[slot]
+        if row.get("action_id") and not current.get("action_id"):
+            kept[slot] = row
+    return kept
+
+
+def _due_status(row, today, want):
+    due = str(row.get("due_date") or "")
+    if want == "overdue":
+        return bool(due) and due < today
+    if want == "later":
+        return bool(due) and due > today
+    if want == "due":
+        return not due or due <= today
+    return True
+
+
 def _apply_stock(store, rows):
     stock_date = latest_snapshot_date(store, "stock")
     on_hand = _on_hand(store)
@@ -459,7 +593,7 @@ def _staff_options(store):
     return options
 
 
-def build_worklist(store, scope, report_date=""):
+def build_worklist(store, scope, report_date="", kind="", due=""):
     scope = scope or {}
     if scope.get("reps") == []:
         return {
@@ -476,9 +610,17 @@ def build_worklist(store, scope, report_date=""):
     rows, today = _follow_rows(store, scope, directory, reps, "")
     rows.extend(_repurchase_rows(store, scope, directory, reps, today))
     rows.extend(_inactive_rows(store, scope, directory, reps, report_date, today))
+    rows.extend(_stock_rows(store, scope, today))
     _attach_actions(rows, store, scope, directory, reps, today)
     _apply_credit(store, rows)
     _apply_stock(store, rows)
+    rows = _collapse(rows)
+    kind = clean_text(kind)
+    due = clean_text(due)
+    if kind:
+        rows = [row for row in rows if row.get("kind") == kind]
+    if due:
+        rows = [row for row in rows if _due_status(row, today, due)]
     _sort(rows)
     return {
         "as_of": today,

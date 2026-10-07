@@ -1,14 +1,34 @@
 """Audit, backup, entitlements, and support-hour records."""
 
+import json
+
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
+from fastapi.responses import Response
 
 from server.audit import list_events, record
 from server.auth import assert_perm, require_user
 from server.backup import restore_org, snapshot_org
-from server.hosted import record_support_hours, set_entitlement, support_gate
+from server.hosted import diagnostics_view, license_view, record_support_hours, set_entitlement, support_gate
 from server.store import get_store
 
 router = APIRouter()
+
+
+@router.get("/api/license")
+def api_license(user=Depends(require_user)):
+    assert_perm(user, "settings.advanced")
+    return license_view(get_store())
+
+
+@router.get("/api/license/diagnostics")
+def api_diagnostics(user=Depends(require_user)):
+    assert_perm(user, "settings.advanced")
+    body = json.dumps(diagnostics_view(get_store()), default=str).encode("utf-8")
+    return Response(
+        content=body,
+        media_type="application/json",
+        headers={"Content-Disposition": "attachment; filename=vay-diagnostics.json"},
+    )
 
 
 @router.get("/api/audit")

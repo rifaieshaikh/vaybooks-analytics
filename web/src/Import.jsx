@@ -138,6 +138,12 @@ function OnboardingPreview({ active, reportDate }) {
         >Compare totals</button>
       </p>
       {compareErr ? <p className="err">{compareErr}</p> : null}
+      {(data.decisions || []).map((row) => (
+        <p key={row.type} className="muted">{row.message}</p>
+      ))}
+      {data.controls?.sales?.match === false || data.controls?.outstanding?.match === false ? (
+        <p className="warn">A control total does not match the file. Correct the export and import it again before you rely on the report.</p>
+      ) : null}
       {(data.exceptions || []).map((row) => (
         <p key={row.id} className="warn">{row.message}</p>
       ))}

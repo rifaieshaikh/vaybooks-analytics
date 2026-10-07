@@ -378,6 +378,10 @@ export default function OrganizationSection() {
           <div className="stack">
             <div className="form-grid">
               <label>
+                Company name
+                <input value={policy.company_name || ""} onChange={(e) => patch("company_name", e.target.value)} />
+              </label>
+              <label>
                 Fiscal year starts
                 <select
                   value={policy.fiscal_year_start_month || 4}

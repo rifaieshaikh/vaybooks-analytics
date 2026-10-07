@@ -5,6 +5,7 @@ import NameReviewSection from "./settings/NameReviewSection";
 import DueDaysSection from "./settings/DueDaysSection";
 import NetworkSection from "./settings/NetworkSection";
 import OrderCheckDefaultsSection from "./settings/OrderCheckDefaultsSection";
+import LicenseSection from "./settings/LicenseSection";
 import OrganizationSection from "./settings/OrganizationSection";
 import PartyTypesSection from "./settings/PartyTypesSection";
 import RolesSection from "./settings/RolesSection";
@@ -14,6 +15,7 @@ import UsersSection from "./settings/UsersSection";
 export default function SettingsPage({ section, user, onFactoryReset }) {
   if (section === "network") return <NetworkSection />;
   if (section === "organization") return <OrganizationSection />;
+  if (section === "license") return <LicenseSection />;
   if (section === "account-names") {
     return (
       <div className="stack">

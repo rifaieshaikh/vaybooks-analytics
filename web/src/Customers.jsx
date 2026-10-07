@@ -2,6 +2,7 @@ import { Fragment, useEffect, useState } from "react";
 import SectionTabs, { rememberedTab } from "./SectionTabs";
 import { api } from "./api";
 import CollectionFollowUp from "./CollectionFollowUp";
+import ExplainFigure from "./ExplainFigure";
 import { CHART, can } from "./theme";
 import { AGE_KEYS, AGE_LABELS, ageLabel, bandKey, bucketMoney, hashBack, hashGet, hashReturnLabel, hashSet, initials, money, moneyOrDash, round2, rowBucket } from "./format";
 import AgeBar, { ageParts } from "./AgeBar";
@@ -642,6 +643,7 @@ function Profile({ detail, runId, canSales, canStock, canEditDueDays, canManage,
         <div className="hero-due">
           <span className="muted">{detail.credit ? "Advance" : "Amount due"}</span>
           <div className="hero-num">{money(detail.credit ? Math.abs(detail.due) : detail.due)}</div>
+          {detail.ar_explanation ? <ExplainFigure explanation={detail.ar_explanation} label="Explain amount due" /> : null}
           {detail.balance_issue || detail.ledger_opening ? (
             <p className="muted">
               Opening {money(detail.ledger_opening || 0)}

@@ -24,13 +24,14 @@ from server.collection import (
     create_promise,
     customer_follow_up,
     follow_up_queues,
+    reminder_context,
     update_contact,
     update_dispute,
     update_promise,
 )
 from server.org_policy import get_org_policy
 from server.phase2 import build_bundle, open_review_count
-from server.reorder import build_reorder, save_proposal, _load
+from server.reorder import build_reorder, item_pack_rules, save_proposal, _load
 from server.schemas import (
     ActionBody,
     ActionStatusBody,
@@ -42,7 +43,7 @@ from server.schemas import (
 )
 from server.store import get_store
 from server.weekly import ensure_weekly_run_once
-from server.worklist import build_worklist, resolve_scope
+from server.worklist import build_worklist, customer_in_scope, resolve_scope
 
 router = APIRouter()
 
@@ -121,7 +122,13 @@ def api_worklist(request: Request, user=Depends(require_user)):
     runs = [row for row in (store.list_runs() or []) if row.get("status") == "succeeded"]
     report_date = str((runs[0].get("report_date") if runs else "") or "")[:10]
     from server.explain import annotate_today
-    payload = build_worklist(store, scope, report_date)
+    payload = build_worklist(
+        store,
+        scope,
+        report_date,
+        kind=request.query_params.get("kind") or "",
+        due=request.query_params.get("due") or "",
+    )
     return annotate_today(store, payload, user.get("permissions") or [])
 
 
@@ -154,19 +161,54 @@ def api_action_status(action_id: str, body: ActionStatusBody, user=Depends(requi
         raise HTTPException(404 if message == "Action not found" else 400, message) from exc
 
 
+def _scoped_collection(store, user, payload):
+    from server.worklist import customers_in_scope
+    if customers_in_scope(store, user) is None:
+        return payload
+    def keep(row):
+        return customer_in_scope(store, user, (row or {}).get("customer_name") or "")
+    payload = dict(payload)
+    for key in ("due_follow_ups", "missed_promises", "pending_refresh"):
+        if key in payload:
+            payload[key] = [row for row in payload[key] if keep(row)]
+    return payload
+
+
+def _require_customer_scope(store, user, customer_name):
+    if not customer_in_scope(store, user, customer_name):
+        raise HTTPException(403, "Forbidden")
+
+
 @router.get("/api/collection/queues")
 def api_collection_queues(user=Depends(require_user)):
     if not _can_read(user):
         raise HTTPException(403, "Forbidden")
-    return follow_up_queues(get_store())
+    store = get_store()
+    return _scoped_collection(store, user, follow_up_queues(store))
+
+
+@router.get("/api/collection/reminder")
+def api_collection_reminder(request: Request, user=Depends(require_user)):
+    if not _can_read_customer(user):
+        raise HTTPException(403, "Forbidden")
+    store = get_store()
+    name = request.query_params.get("customer") or ""
+    _require_customer_scope(store, user, name)
+    try:
+        return reminder_context(store, name)
+    except ValueError as exc:
+        _collection_error(exc)
 
 
 @router.get("/api/collection")
 def api_collection_customer(request: Request, user=Depends(require_user)):
     if not _can_read_customer(user):
         raise HTTPException(403, "Forbidden")
+    store = get_store()
+    name = request.query_params.get("customer") or ""
+    _require_customer_scope(store, user, name)
     try:
-        return customer_follow_up(get_store(), request.query_params.get("customer") or "")
+        return customer_follow_up(store, name)
     except ValueError as exc:
         _collection_error(exc)
 
@@ -300,7 +342,7 @@ def api_reorder(request: Request, user=Depends(require_user)):
     from server.items360 import purchase_plans
     from vay.eligibility import latest_snapshot_date
     proposal = _load(store)
-    built = build_reorder(purchase_plans(store), proposal)
+    built = build_reorder(purchase_plans(store), proposal, item_pack_rules(store))
     built["report_date"] = str(run.get("report_date") or "")[:10]
     built["stock_date"] = latest_snapshot_date(store, "stock")
     built["status"] = "eligible"

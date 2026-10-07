@@ -398,6 +398,7 @@ function Collection({ data, matches, onAssign, user }) {
                   <p className="analytics-title">{row.customer_name}</p>
                   <div className="analytics-meta">
                     <span>Due {row.next_follow_up}</span>
+                    {row.staff ? <span>{row.staff}</span> : null}
                     {row.next_step ? <span>{row.next_step}</span> : null}
                   </div>
                 </div>
@@ -412,8 +413,11 @@ function Collection({ data, matches, onAssign, user }) {
                 <div>
                   <p className="analytics-title">{row.customer_name}</p>
                   <div className="analytics-meta">
+                    <span>{money(row.allocated)} confirmed</span>
                     <span>{money(row.remaining)} left</span>
                     <span>Promised {row.promised_on}</span>
+                    {row.staff ? <span>{row.staff}</span> : null}
+                    {row.receipt_coverage_through ? <span>Receipts through {row.receipt_coverage_through}</span> : null}
                   </div>
                 </div>
                 <button type="button" className="secondary" onClick={() => setFollow(row.customer_name)}>Open</button>
@@ -620,23 +624,27 @@ const WORK_KIND = {
   pending_refresh: "Promise",
   repurchase: "Repurchase",
   inactive: "Inactive",
+  stock: "Stock",
 };
 
 function TodayPage({ user }) {
   const [data, setData] = useState(null);
   const [err, setErr] = useState("");
   const [staff, setStaff] = useState("");
+  const [kind, setKind] = useState("");
+  const [due, setDue] = useState("");
   const [open, setOpen] = useState(null);
+  const [assign, setAssign] = useState(null);
   const manage = can(user, "actions.manage");
 
-  function load(nextStaff) {
-    const who = nextStaff === undefined ? staff : nextStaff;
-    api.worklist(who)
+  function load(next) {
+    const query = { staff, kind, due, ...(next || {}) };
+    api.worklist(query)
       .then((payload) => { setData(payload); setErr(""); })
       .catch((e) => setErr(e.message || "Could not load today's work"));
   }
 
-  useEffect(() => { load(""); }, []);
+  useEffect(() => { load(); }, []);
 
   async function mark(row, status) {
     setErr("");
@@ -657,7 +665,7 @@ function TodayPage({ user }) {
       {data.can_pick_staff ? (
         <label>
           Staff
-          <select value={staff} onChange={(e) => { setStaff(e.target.value); load(e.target.value); }}>
+          <select value={staff} onChange={(e) => { setStaff(e.target.value); load({ staff: e.target.value }); }}>
             <option value="">All accounts</option>
             {(data.staff_options || []).map((person) => (
               <option key={person.username} value={person.username}>
@@ -667,14 +675,32 @@ function TodayPage({ user }) {
           </select>
         </label>
       ) : null}
+      <label>
+        Work
+        <select value={kind} onChange={(e) => { setKind(e.target.value); load({ kind: e.target.value }); }}>
+          <option value="">All work</option>
+          {Object.entries(WORK_KIND).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+        </select>
+      </label>
+      <label>
+        Due
+        <select value={due} onChange={(e) => { setDue(e.target.value); load({ due: e.target.value }); }}>
+          <option value="">Any date</option>
+          <option value="due">Due</option>
+          <option value="overdue">Overdue</option>
+          <option value="later">Later</option>
+        </select>
+      </label>
       {data.message && rows.length ? <p className="warn">{data.message}</p> : null}
       {err ? <p className="err">{err}</p> : null}
       {rows.length ? rows.map((row) => (
         <article className="analytics-item" key={row.id || row.kind + ":" + row.customer}>
           <div>
-            <p className="analytics-title">{row.customer}</p>
+            <p className="analytics-title">{row.kind === "stock" ? (row.products?.[0] || row.customer) : row.customer}</p>
             <div className="analytics-meta">
               <span>{WORK_KIND[row.kind] || row.kind}</span>
+              {row.owner ? <span>{row.owner}</span> : null}
+              {row.due_date ? <span>Due {row.due_date}</span> : null}
               {row.salesperson ? <span>{row.salesperson}</span> : null}
               <span>{row.age} days</span>
               {row.products?.length ? <span>{row.products.join(", ")}</span> : null}
@@ -690,9 +716,20 @@ function TodayPage({ user }) {
             {row.basis?.basis === "live" ? <p className="muted">Latest data</p> : null}
             {row.basis?.mixed_coverage && row.basis.coverage_note ? <p className="warn">{row.basis.coverage_note}</p> : null}
             {row.blocked ? <p className="warn">{row.next_step}</p> : (row.next_step ? <p className="muted">{row.next_step}</p> : null)}
+            {row.explanation ? <ExplainFigure explanation={row.explanation} label="Explain" /> : null}
           </div>
           <div className="row gap">
             <button type="button" className="secondary" onClick={() => setOpen(row)}>Open</button>
+            {manage ? (
+              <button type="button" className="secondary" onClick={() => setAssign({
+                action_type: row.kind === "stock" ? "purchase" : (row.kind === "inactive" || row.kind === "repurchase" ? "recovery" : "collection"),
+                subject_kind: row.kind === "stock" ? "item" : "customer",
+                subject_name: row.kind === "stock" ? (row.products?.[0] || row.customer) : row.customer,
+                proposal: row.next_step || row.reason || "Follow up",
+                due_date: row.due_date || "",
+                amount: row.amount,
+              })}>Assign</button>
+            ) : null}
             {row.evidence?.name ? (
               <button type="button" className="secondary" onClick={() => drill({ drill: row.evidence })}>Evidence</button>
             ) : null}
@@ -705,7 +742,7 @@ function TodayPage({ user }) {
           </div>
         </article>
       )) : <p className="muted">{data.message || "Nothing is due today."}</p>}
-      {open ? createPortal(
+      {open && open.kind !== "stock" ? createPortal(
         <div className="modal-backdrop" onClick={() => { setOpen(null); load(); }}>
           <div className="modal assign-modal follow-modal" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
             <div className="card-head">
@@ -717,10 +754,34 @@ function TodayPage({ user }) {
               actionId={open.action_id || ""}
               canManage={manage}
               user={user}
+              onReminder={() => api.customerPdf(open.customer, open.customer, { view: "reminder" })}
             />
           </div>
         </div>,
         document.body,
+      ) : null}
+      {open && open.kind === "stock" ? createPortal(
+        <div className="modal-backdrop" onClick={() => setOpen(null)}>
+          <div className="modal" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+            <div className="card-head">
+              <h3>{open.products?.[0] || open.customer}</h3>
+              <button type="button" className="ghost" onClick={() => setOpen(null)}>Close</button>
+            </div>
+            <p>{open.reason}</p>
+            {open.owner ? <p className="muted">Owner {open.owner}</p> : null}
+            {open.due_date ? <p className="muted">Due {open.due_date}</p> : null}
+            {open.amount != null ? <p className="muted">Quantity {open.amount}</p> : null}
+          </div>
+        </div>,
+        document.body,
+      ) : null}
+      {assign ? (
+        <AssignDialog
+          draft={assign}
+          user={user}
+          onClose={() => setAssign(null)}
+          onSaved={() => { setAssign(null); load(); }}
+        />
       ) : null}
     </div>
   );
@@ -756,6 +817,15 @@ function WeeklyReview({ run, user }) {
             </article>
           ))}
           {!(data.suggestions || []).length ? <p className="muted">No suggestions for this report.</p> : null}
+          {(data.results?.recovery || []).length ? (
+            <div>
+              <h3>Bought again after contact</h3>
+              {(data.results.recovery || []).map((row) => (
+                <p key={row.customer + row.sale_date}>{row.customer} bought on {row.sale_date} after contact on {row.contacted_on}.</p>
+              ))}
+              <p className="muted">{data.results.attribution}</p>
+            </div>
+          ) : null}
         </div>
       </section>
       <section>
@@ -767,6 +837,9 @@ function WeeklyReview({ run, user }) {
           <span>Kept {data.results?.promises?.kept || 0}</span>
           <span>Partial {data.results?.promises?.partial || 0}</span>
           <span>Missed {data.results?.promises?.missed || 0}</span>
+          {(data.results?.by_owner || []).map((row) => (
+            <span key={row.owner}>{row.owner}: {row.open} open, {row.overdue} overdue</span>
+          ))}
           <span>Pending {data.results?.promises?.pending_refresh || 0}</span>
         </div>
         <p className="muted">

@@ -4,6 +4,12 @@ Date: 2026-10-07
 Status: Proposed improvements; implementation and customer validation pending  
 Audience: Product owner, engineering team, sales, and pilot operators
 
+For international customer targeting and implementation tasks, see the
+[Global product strategy](global-product-strategy.md) and
+[Global product task list](global-product-task-list.md). Their current-code
+inventory includes foundations added since this improvement assessment; recheck
+implementation evidence before treating an earlier proposal as unimplemented.
+
 ## 1. Purpose and customer promise
 
 Make Vay more valuable to wholesale and distribution businesses by helping them

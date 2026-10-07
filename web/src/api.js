@@ -77,6 +77,20 @@ export const api = {
     return req("/api/collection" + (qs ? "?" + qs : ""));
   },
   collectionQueues: () => req("/api/collection/queues"),
+  collectionReminder: (customer) => req("/api/collection/reminder?customer=" + encodeURIComponent(customer || "")),
+  demoStatus: () => req("/api/demo"),
+  openDemo: () => req("/api/demo", { method: "POST" }),
+  license: () => req("/api/license"),
+  downloadDiagnostics: async () => {
+    const data = await req("/api/license/diagnostics");
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "vay-diagnostics.json";
+    a.click();
+    URL.revokeObjectURL(url);
+  },
   createCollectionContact: (body) =>
     req("/api/collection/contacts", {
       method: "POST",
@@ -340,9 +354,13 @@ export const api = {
     a.click();
     URL.revokeObjectURL(url);
   },
-  worklist: (staff) => {
-    const qs = staff ? "?staff=" + encodeURIComponent(staff) : "";
-    return req("/api/worklist" + qs);
+  worklist: (params) => {
+    const q = new URLSearchParams();
+    Object.entries(params || {}).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && String(value) !== "") q.set(key, value);
+    });
+    const qs = q.toString();
+    return req("/api/worklist" + (qs ? "?" + qs : ""));
   },
   users: () => req("/api/users"),
   createUser: (body) =>

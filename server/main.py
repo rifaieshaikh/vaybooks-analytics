@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from server.routers import actions, analytics, auth, hosted, mappers, phase5, runs, saved_reports, settings_api, uploads, users, views
+from server.routers import actions, analytics, auth, demo, hosted, mappers, phase5, runs, saved_reports, settings_api, uploads, users, views
 from server.settings import MAX_UPLOAD_BYTES, cors_origins, lan_ips, listen_port, web_dist
 from server.startup import fail_orphaned_jobs
 from server.store import get_store
@@ -89,6 +89,7 @@ def info(request: Request):
 
 for api_router in (
     auth.router,
+    demo.router,
     analytics.router,
     actions.router,
     saved_reports.router,

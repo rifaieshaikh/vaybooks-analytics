@@ -57,6 +57,7 @@ class OrgPolicyBody(BaseModel):
     timezone: str | None = "Asia/Kolkata"
     currency_code: str | None = "INR"
     currency_symbol: str | None = "₹"
+    company_name: str | None = None
     sales_tax_inclusive_rate: float | None = 0.18
     ar_balance_tolerance: float | None = None
     expense_pack: str | None = "vay_wholesale"
@@ -188,6 +189,7 @@ class CollectionPromiseBody(BaseModel):
     amount: float | None = None
     promised_on: str = ""
     invoice_refs: list | str = ""
+    staff: str = ""
 
 
 class CollectionDisputeBody(BaseModel):
@@ -197,6 +199,7 @@ class CollectionDisputeBody(BaseModel):
     note: str = ""
     status: str = ""
     opened_on: str = ""
+    staff: str = ""
 
 
 class CollectionAllocationBody(BaseModel):

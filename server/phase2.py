@@ -505,6 +505,34 @@ def onboarding(store, report_date, entered=None):
         controls=controls,
     )
     payload["report_date"] = rd
+    decisions = {
+        "sales": "Sales comparisons and customer recovery need a sales export.",
+        "receipt": "Confirming what was collected needs a receipt export.",
+        "arr": "Who to collect from needs an outstanding-balance export.",
+        "stock": "What to buy needs a stock export.",
+        "items": "Selling pace needs item sales.",
+    }
+    payload["decisions"] = [
+        {"type": key, "message": text}
+        for key, text in decisions.items()
+        if key not in present
+    ]
+    payload["templates"] = [
+        {"type": "sales", "columns": ["Date", "Party Name", "Sales Rep", "Net Amount"]},
+        {"type": "receipt", "columns": ["Date", "Account Name", "Sales Rep", "Amount"]},
+        {"type": "arr", "columns": ["Account Name", "Group", "Balance"]},
+        {"type": "items", "columns": ["Date", "Item Name", "Qty", "Rate"]},
+        {"type": "stock", "columns": ["Item Name", "Qty", "P.Price"]},
+    ]
+    from server.org_policy import get_org_policy
+    policy = get_org_policy(store)
+    payload["policy"] = {
+        "company_name": policy.get("company_name") or "",
+        "timezone": policy.get("timezone") or "",
+        "currency_code": policy.get("currency_code") or "",
+        "currency_symbol": policy.get("currency_symbol") or "",
+        "fiscal_year_start_month": policy.get("fiscal_year_start_month"),
+    }
     return payload
 
 

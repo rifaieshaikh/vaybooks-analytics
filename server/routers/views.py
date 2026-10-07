@@ -215,6 +215,12 @@ def api_customer_pdf(uk: str, request: Request, user=Depends(require_user)):
     detail = snapshot_get_customer(store, uk, views)
     if not detail:
         raise HTTPException(404, "Not found")
+    from server.org_policy import get_org_policy
+    policy = get_org_policy(store)
+    detail = dict(detail)
+    detail["company_name"] = policy.get("company_name") or ""
+    detail["currency_code"] = policy.get("currency_code") or ""
+    detail["currency_symbol"] = policy.get("currency_symbol") or ""
     view = _normalize_pdf_view(params.get("view"))
     if view == "reminder":
         from server.collection import reminder_context
@@ -321,6 +327,23 @@ def api_get_customer(uk: str, request: Request, user=Depends(require_user)):
         payload = customer_profile(detail)
     else:
         payload = detail
+    if isinstance(payload, dict):
+        from server.explain import _FORMULAS
+        payload = dict(payload)
+        payload["ar_explanation"] = {
+            "id": "customer-ar:%s" % (payload.get("uk") or payload.get("name") or ""),
+            "label": "Amount due",
+            "formula": _FORMULAS["ar_balance"],
+            "basis": "live",
+            "value": payload.get("due"),
+            "status": "available" if payload.get("due") is not None else "unavailable",
+            "reason": "" if payload.get("due") is not None else "Outstanding balance is not on the receivables snapshot.",
+            "window": {
+                "to": str(payload.get("as_of") or "")[:10],
+                "report_date": str(payload.get("as_of") or "")[:10],
+            },
+            "sources": [],
+        }
     return with_stale(payload, stale, run)
 
 
