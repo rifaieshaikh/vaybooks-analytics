@@ -16,6 +16,7 @@ import ImportPage from "./Import";
 import ItemsPage from "./Items";
 import LoginPage from "./Login";
 import ReportsPage from "./Reports";
+import SectionTabs from "./SectionTabs";
 import RepsPage from "./Reps";
 import SalesPage from "./Sales";
 import SettingsPage from "./Settings";
@@ -23,7 +24,7 @@ import SnapshotPicker from "./SnapshotPicker";
 import SetupWizard from "./SetupWizard";
 import StockPage from "./Stock";
 import { api } from "./api";
-import { can, findItem, firstRoute, visibleNav } from "./theme";
+import { can, chooseSection, destinationAllowed, findItem, firstRoute, permittedTabs, resolveRoute, visibleNav } from "./theme";
 import { profitRan } from "./reportUtils";
 import { hashReset, hashSet } from "./format";
 import "./styles.css";
@@ -75,29 +76,51 @@ function createProgressLabel(run) {
   return total ? "Creating reports · " + pct + "%" : "Creating reports…";
 }
 
+function ReportLibrary({ run, tabs, section, onSection, familyPresent }) {
+  const selected = tabs.find((row) => row.id === section) || tabs[0];
+  if (!selected) return <p className="muted">That page is not available for this account.</p>;
+  return (
+    <>
+      <SectionTabs
+        label="Report families"
+        storageKey="nav:library"
+        tabs={tabs.map((row) => ({
+          ...row,
+          disabled: !familyPresent(row.family),
+          title: familyPresent(row.family) ? row.label : "This family is not in the last run",
+        }))}
+        value={selected.id}
+        onChange={onSection}
+      />
+      <ReportsPage run={run} family={selected.family} />
+    </>
+  );
+}
+
 function routeFromHash(h, u) {
   if ((h.startsWith("customer/") || h.startsWith("list/customers")) && can(u, "customer.view")) {
-    return { tab: "customers", sub: "customers" };
+    return { tab: "customers", sub: "list" };
   }
   if (h.startsWith("group/") && can(u, "customer.view")) return { tab: "customers", sub: "groups" };
-  if (h.startsWith("rep/") && can(u, "customer.view")) return { tab: "customers", sub: "reps" };
-  if (h.startsWith("invoice/") && can(u, "sales.view")) return { tab: "sales", sub: "sales" };
-  if (h.startsWith("item/") && can(u, "stock.view")) return { tab: "customers", sub: "items" };
-  if (h.startsWith("category/") && can(u, "stock.view")) return { tab: "customers", sub: "item-category" };
-  if (h.startsWith("item-group/") && can(u, "stock.view")) return { tab: "customers", sub: "item-group" };
-  if (h.startsWith("brand/") && can(u, "stock.view")) return { tab: "customers", sub: "brand" };
-  if (h.startsWith("supplier/") && can(u, "stock.view")) return { tab: "customers", sub: "supplier" };
-  if (h.startsWith("list/stock") && can(u, "stock.view")) return { tab: "stock", sub: "stock" };
-  if (h.startsWith("list/arr") && can(u, "arr.view")) return { tab: "finance", sub: "arr" };
+  if (h.startsWith("rep/") && can(u, "customer.view")) return { tab: "sales", sub: "reps" };
+  if (h.startsWith("invoice/") && can(u, "sales.view")) return { tab: "sales", sub: "invoices" };
+  if (h.startsWith("item/") && can(u, "stock.view")) return { tab: "inventory", sub: "item-profiles" };
+  if (h.startsWith("category/") && can(u, "stock.view")) return { tab: "inventory", sub: "categories" };
+  if (h.startsWith("item-group/") && can(u, "stock.view")) return { tab: "inventory", sub: "item-groups" };
+  if (h.startsWith("brand/") && can(u, "stock.view")) return { tab: "inventory", sub: "brands" };
+  if (h.startsWith("supplier/") && can(u, "stock.view")) return { tab: "inventory", sub: "suppliers" };
+  if (h.startsWith("list/stock") && can(u, "stock.view")) return { tab: "inventory", sub: "stock" };
+  if (h.startsWith("list/arr") && can(u, "arr.view")) return { tab: "finance", sub: "outstanding" };
   return null;
 }
 
 export default function App() {
   const [user, setUser] = useState(null);
   const [ready, setReady] = useState(false);
-  const [tab, setTab] = useState("sales");
-  const [sub, setSub] = useState("sales");
-  const [openTab, setOpenTab] = useState("sales");
+  const [tab, setTab] = useState("overview");
+  const [sub, setSub] = useState("dashboard");
+  const [section, setSection] = useState("");
+  const [openTab, setOpenTab] = useState("overview");
   const [run, setRun] = useState(null);
   const [runId, setRunId] = useState("");
   const [runs, setRuns] = useState([]);
@@ -108,9 +131,11 @@ export default function App() {
       const h = (window.location.hash || "").replace(/^#/, "");
       const hashed = routeFromHash(h, u);
       const route = hashed || firstRoute(u);
-      setTab(route.tab);
-      setSub(route.sub);
-      setOpenTab(route.tab);
+      const resolved = resolveRoute(route.tab, route.sub);
+      setTab(resolved.tab);
+      setSub(resolved.sub);
+      setOpenTab(resolved.tab);
+      setSection(chooseSection(u, findItem(resolved.tab, resolved.sub), resolved.section));
     }).catch(() => setUser(null)).finally(() => setReady(true));
   }, []);
 
@@ -128,9 +153,11 @@ export default function App() {
       const h = (window.location.hash || "").replace(/^#/, "");
       const hashed = routeFromHash(h, user);
       if (hashed) {
-        setTab(hashed.tab);
-        setSub(hashed.sub);
-        setOpenTab(hashed.tab);
+        const resolved = resolveRoute(hashed.tab, hashed.sub);
+        setTab(resolved.tab);
+        setSub(resolved.sub);
+        setOpenTab(resolved.tab);
+        setSection(chooseSection(user, findItem(resolved.tab, resolved.sub), resolved.section));
       }
     }
     window.addEventListener("hashchange", onHash);
@@ -230,6 +257,13 @@ export default function App() {
 
   const nav = useMemo(() => (user ? visibleNav(user) : []), [user]);
   const item = findItem(tab, sub);
+  useEffect(() => {
+    if (!user || !item?.tabs?.length) return;
+    const allowed = permittedTabs(user, item).map((row) => row.id);
+    if (section && allowed.includes(section)) return;
+    const next = chooseSection(user, item, "");
+    if (next !== section) setSection(next);
+  }, [user, item, section]);
   const snapshotNeeded = item?.kind === "reports" || item?.kind === "export";
   useEffect(() => {
     if (!snapshotNeeded || run?.status !== "succeeded" || !run?.id || run.snapshot) return undefined;
@@ -244,11 +278,12 @@ export default function App() {
     return () => { cancelled = true; };
   }, [snapshotNeeded, run?.id, run?.status, run?.snapshot]);
   const crumb = useMemo(() => {
-    const group = nav.find((t) => t.id === tab);
+    const group = nav.find((entry) => entry.id === tab);
     const current = group?.items.find((i) => i.id === sub);
     if (!group || !current) return { section: "Vay Reports", page: "" };
-    return { section: group.label, page: current.label };
-  }, [nav, tab, sub]);
+    const selected = (current.tabs || []).find((row) => row.id === section);
+    return { section: group.label, page: selected ? current.label + " · " + selected.label : current.label };
+  }, [nav, tab, sub, section]);
 
   useEffect(() => {
     document.title = crumb.page ? crumb.section + " · " + crumb.page : crumb.section;
@@ -264,10 +299,14 @@ export default function App() {
     return (reports || []).some((r) => r.group === family);
   };
 
-  function go(nextTab, nextSub) {
-    setTab(nextTab);
-    setSub(nextSub);
-    setOpenTab(nextTab);
+  function go(nextTab, nextSub, actor) {
+    const who = actor || user;
+    const resolved = resolveRoute(nextTab, nextSub);
+    const destination = findItem(resolved.tab, resolved.sub);
+    setTab(resolved.tab);
+    setSub(resolved.sub);
+    setOpenTab(resolved.tab);
+    setSection(chooseSection(who, destination, resolved.section));
     if (window.location.hash && window.location.hash !== "#") {
       hashSet("");
     }
@@ -291,7 +330,7 @@ export default function App() {
   }
 
   if (!ready) return <div className="login-wrap"><p className="muted">Loading…</p></div>;
-  if (!user) return <LoginPage onLogin={(u) => { setUser(u); const route = firstRoute(u); go(route.tab, route.sub); }} />;
+  if (!user) return <LoginPage onLogin={(u) => { setUser(u); const route = firstRoute(u); go(route.tab, route.sub, u); }} />;
   if (user.must_change_password) return <ChangePasswordPage user={user} onChanged={setUser} />;
 
   const viewRunId = succeeded ? run?.id : "";
@@ -299,26 +338,37 @@ export default function App() {
   return (
     <div className="shell">
       <aside className="sidebar">
-        <button type="button" className="brand" onClick={() => go("home", "home")}><span>Vay Reports</span></button>
+        <button type="button" className="brand" onClick={() => go("overview", "dashboard")}><span>Vay Reports</span></button>
         {nav.map((group) => (
           <div className="nav-group" key={group.id}>
-            <button className={"nav-tab" + (openTab === group.id ? " open" : "")} onClick={() => {
-              setOpenTab(group.id === openTab ? "" : group.id);
-              if (group.items[0]) go(group.id, group.items[0].id);
-            }}>
+            <button
+              type="button"
+              className={"nav-tab" + (openTab === group.id ? " open" : "")}
+              aria-expanded={openTab === group.id}
+              onClick={() => setOpenTab(group.id === openTab ? "" : group.id)}
+            >
               <span>{group.label}</span>
             </button>
             <div className={"nav-sub" + (openTab === group.id ? " open" : "")}>
               {group.items.map((entry) => {
-                const disabled = (entry.kind === "reports" && !familyPresent(entry.family))
-                  || (entry.kind === "analytics" && entry.id !== "today" && !succeeded);
+                let blocked = "";
+                if (entry.id === "library") blocked = succeeded ? "" : "Create reports first";
+                else if (entry.kind === "reports" && !familyPresent(entry.family)) {
+                  blocked = succeeded ? "This family is not in the last run" : "Create reports first";
+                } else if (entry.kind === "analytics" && entry.section !== "today" && !succeeded) {
+                  blocked = "Create reports first";
+                }
+                const active = tab === group.id && sub === entry.id;
                 return (
                   <button
                     type="button"
                     key={entry.id}
-                    className={"nav-item" + (tab === group.id && sub === entry.id ? " active" : "") + (disabled ? " disabled" : "")}
-                    title={disabled ? "Create reports first" : ""}
-                    onClick={() => { if (!disabled) go(group.id, entry.id); }}
+                    className={"nav-item" + (active ? " active" : "") + (blocked ? " disabled" : "")}
+                    aria-current={active ? "page" : undefined}
+                    aria-disabled={blocked ? true : undefined}
+                    aria-label={blocked ? entry.label + ". " + blocked : entry.label}
+                    title={blocked || entry.label}
+                    onClick={() => { if (!blocked) go(group.id, entry.id); }}
                   >
                     {entry.label}
                   </button>
@@ -370,7 +420,8 @@ export default function App() {
         <main className="content">
           <SetupWizard user={user} onGo={go} />
           <DemoCard user={user} onOpened={loadRuns} />
-          {item?.kind === "home" ? (
+          {item && !destinationAllowed(user, item) ? <p className="muted">That page is not available for this account.</p> : null}
+          {destinationAllowed(user, item) && item?.kind === "home" ? (
             <DashboardPage
               user={user}
               run={succeeded ? run : null}
@@ -380,7 +431,7 @@ export default function App() {
               onGo={go}
             />
           ) : null}
-          {item?.kind === "import" ? (
+          {destinationAllowed(user, item) && item?.kind === "import" ? (
             <ImportPage
               onGo={go}
               busy={busy}
@@ -388,19 +439,19 @@ export default function App() {
               onQueued={queueRun}
             />
           ) : null}
-          {item?.kind === "explore" ? <ExplorePage /> : null}
-          {item?.kind === "data" ? <DataPage key={item.id} type={item.type} title={item.label} user={user} /> : null}
-          {item?.kind === "sales" ? <SalesPage /> : null}
-          {item?.kind === "items" ? <ItemsPage /> : null}
-          {item?.kind === "business" ? <BusinessPage user={user} runId={viewRunId} onGo={go} /> : null}
-          {item?.kind === "customers" ? <CustomersPage user={user} runId={viewRunId} /> : null}
-          {item?.kind === "items360" ? <StockPage user={user} profile runId={viewRunId} /> : null}
-          {item?.kind === "item-dim" ? <ItemDimsPage dimension={item.dimension} runId={viewRunId} /> : null}
-          {item?.kind === "groups" ? <GroupsPage user={user} runId={viewRunId} /> : null}
-          {item?.kind === "reps" ? <RepsPage user={user} runId={viewRunId} /> : null}
-          {item?.kind === "stock" ? <StockPage user={user} profile={false} runId={viewRunId} /> : null}
-          {item?.kind === "cash" ? <CashPage /> : null}
-          {item?.kind === "create" ? (
+          {destinationAllowed(user, item) && item?.kind === "explore" ? <ExplorePage /> : null}
+          {destinationAllowed(user, item) && item?.kind === "data" ? <DataPage key={item.id} type={item.type} title={item.label} user={user} /> : null}
+          {destinationAllowed(user, item) && item?.kind === "sales" ? <SalesPage /> : null}
+          {destinationAllowed(user, item) && item?.kind === "items" ? <ItemsPage /> : null}
+          {destinationAllowed(user, item) && item?.kind === "business" ? <BusinessPage user={user} runId={viewRunId} onGo={go} /> : null}
+          {destinationAllowed(user, item) && item?.kind === "customers" ? <CustomersPage user={user} runId={viewRunId} /> : null}
+          {destinationAllowed(user, item) && item?.kind === "items360" ? <StockPage user={user} profile runId={viewRunId} /> : null}
+          {destinationAllowed(user, item) && item?.kind === "item-dim" ? <ItemDimsPage dimension={item.dimension} runId={viewRunId} /> : null}
+          {destinationAllowed(user, item) && item?.kind === "groups" ? <GroupsPage user={user} runId={viewRunId} /> : null}
+          {destinationAllowed(user, item) && item?.kind === "reps" ? <RepsPage user={user} runId={viewRunId} /> : null}
+          {destinationAllowed(user, item) && item?.kind === "stock" ? <StockPage user={user} profile={false} runId={viewRunId} /> : null}
+          {destinationAllowed(user, item) && item?.kind === "cash" ? <CashPage /> : null}
+          {destinationAllowed(user, item) && item?.kind === "create" ? (
             <CreatePage
               user={user}
               busy={busy}
@@ -409,11 +460,30 @@ export default function App() {
               onQueued={queueRun}
             />
           ) : null}
-          {item?.kind === "reports" ? <ReportsPage run={run} family={item.family} /> : null}
-          {item?.kind === "analytics" ? <AnalyticsPage section={item.section} run={succeeded ? run : null} user={user} /> : null}
-          {item?.kind === "export" ? <ExportPage run={run} /> : null}
-          {item?.kind === "excel" ? <ExcelPage run={run} /> : null}
-          {item?.kind === "settings" ? <SettingsPage section={item.section} user={user} onFactoryReset={() => { setRun(null); setRuns([]); }} /> : null}
+          {destinationAllowed(user, item) && item?.kind === "reports" && item.tabs ? (
+            <ReportLibrary
+              run={run}
+              tabs={permittedTabs(user, item)}
+              section={section}
+              onSection={setSection}
+              familyPresent={familyPresent}
+            />
+          ) : null}
+          {destinationAllowed(user, item) && item?.kind === "reports" && !item.tabs ? <ReportsPage run={run} family={item.family} /> : null}
+          {destinationAllowed(user, item) && item?.kind === "analytics" ? <AnalyticsPage section={item.section} run={succeeded ? run : null} user={user} /> : null}
+          {destinationAllowed(user, item) && item?.kind === "export" ? <ExportPage run={run} /> : null}
+          {destinationAllowed(user, item) && item?.kind === "excel" ? <ExcelPage run={run} /> : null}
+          {destinationAllowed(user, item) && item?.kind === "settings" ? (
+            <SettingsPage
+              section={(permittedTabs(user, item).find((row) => row.id === section) || permittedTabs(user, item)[0])?.section}
+              tabs={permittedTabs(user, item)}
+              selected={section}
+              onSection={setSection}
+              storageKey={"nav:" + item.id}
+              user={user}
+              onFactoryReset={() => { setRun(null); setRuns([]); }}
+            />
+          ) : null}
         </main>
       </div>
     </div>

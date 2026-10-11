@@ -101,12 +101,104 @@ export const TYPE_META = {
   payable: { label: "Payables", partyLabel: "Supplier", dates: true, rep: false, group: false, item: false },
 };
 
+const LIBRARY_TABS = [
+  { id: "performance", label: "Performance", family: "Performance", perm: "reports.view.performance" },
+  { id: "followup", label: "Follow-up", family: "Follow-up", perm: "reports.view.followup" },
+  { id: "monthly", label: "Monthly", family: "Monthly", perm: "reports.view.monthly" },
+  { id: "items", label: "Items", family: "Items", perm: "reports.view.items" },
+  { id: "profit", label: "Profit", family: "Profit", perm: "reports.view.profit" },
+];
+
+const SETTINGS_TABS = {
+  organization: [
+    { id: "organization", label: "Organization", section: "organization", perm: "settings.advanced" },
+    { id: "account-names", label: "Account migrations and name review", section: "account-names", perm: "settings.advanced" },
+    { id: "party-types", label: "Party types", section: "party-types", perm: "settings.advanced" },
+  ],
+  "business-rules": [
+    { id: "settlement", label: "Settlement", section: "settlement", perm: "settings.advanced" },
+    { id: "due-days", label: "Due days", section: "due-days", perm: "settings.advanced" },
+    { id: "order-check", label: "Order check", section: "order-check", perm: "settings.advanced" },
+  ],
+  "users-roles": [
+    { id: "users", label: "Users", section: "users", perm: "users.view" },
+    { id: "roles", label: "Roles", section: "roles", perm: "roles.view" },
+  ],
+  "system-support": [
+    { id: "network", label: "Network", section: "network", perm: "__home__" },
+    { id: "license", label: "Plan and support", section: "license", perm: "settings.advanced" },
+    { id: "audit", label: "Audit", section: "audit", perm: "settings.advanced" },
+    { id: "advanced", label: "Advanced", section: "advanced", perm: "settings.advanced" },
+  ],
+};
+
 export const NAV = [
   {
-    id: "home",
-    label: "Home",
+    id: "overview",
+    label: "Overview",
     items: [
-      { id: "home", label: "Dashboard", kind: "home", perm: "__home__" },
+      { id: "dashboard", label: "Dashboard", kind: "home", perm: "__home__" },
+      { id: "today", label: "Today's work", kind: "analytics", section: "today", perm: "reports.view.followup" },
+      { id: "business", label: "Business overview", kind: "business", perm: "customer.view" },
+      { id: "scorecard", label: "Scorecard", kind: "analytics", section: "scorecard", perm: "reports.view.scorecard" },
+      { id: "weekly-review", label: "Weekly review", kind: "analytics", section: "review", perm: "reports.view.scorecard" },
+    ],
+  },
+  {
+    id: "sales",
+    label: "Sales",
+    items: [
+      { id: "invoices", label: "Invoices", kind: "sales", perm: "sales.view" },
+      { id: "returns-credit-notes", label: "Returns and credit notes", kind: "data", type: "credit_note", perm: "credit_note.view" },
+      { id: "item-wise", label: "Item-wise sales", kind: "items", perm: "items.view" },
+      { id: "reps", label: "Sales reps", kind: "reps", perm: "customer.view" },
+      { id: "change", label: "Sales change", kind: "analytics", section: "sales-change", perm: "reports.view.scorecard" },
+    ],
+  },
+  {
+    id: "customers",
+    label: "Customers",
+    items: [
+      { id: "list", label: "Customers", kind: "customers", perm: "customer.view" },
+      { id: "groups", label: "Customer groups", kind: "groups", perm: "customer.view" },
+      { id: "movement", label: "Customer movement", kind: "analytics", section: "customer-movement", perm: "reports.view.scorecard" },
+    ],
+  },
+  {
+    id: "finance",
+    label: "Finance",
+    items: [
+      { id: "collection-worklist", label: "Collection worklist", kind: "analytics", section: "collection", perm: "reports.view.followup" },
+      { id: "outstanding", label: "Outstanding", kind: "data", type: "arr", perm: "arr.view" },
+      { id: "receipts", label: "Receipts", kind: "data", type: "receipt", perm: "receipt.view" },
+      { id: "payments", label: "Payments", kind: "data", type: "payments", perm: "payments.view" },
+      { id: "cash", label: "Cash", kind: "cash", perm: "payments.view" },
+      { id: "parties", label: "Parties", kind: "data", type: "party", perm: "party.view" },
+    ],
+  },
+  {
+    id: "inventory",
+    label: "Inventory",
+    items: [
+      { id: "stock", label: "Stock", kind: "stock", perm: "stock.view" },
+      { id: "item-profiles", label: "Item profiles", kind: "items360", perm: "stock.view" },
+      { id: "categories", label: "Categories", kind: "item-dim", dimension: "category", perm: "stock.view" },
+      { id: "item-groups", label: "Item groups", kind: "item-dim", dimension: "item_group", perm: "stock.view" },
+      { id: "brands", label: "Brands", kind: "item-dim", dimension: "brand", perm: "stock.view" },
+      { id: "suppliers", label: "Suppliers", kind: "item-dim", dimension: "supplier", perm: "stock.view" },
+      { id: "stock-decisions", label: "Stock decisions", kind: "analytics", section: "stock", perm: "reports.view.items" },
+      { id: "reorder", label: "Reorder", kind: "analytics", section: "reorder", perm: "reports.view.items" },
+    ],
+  },
+  {
+    id: "reports",
+    label: "Reports",
+    items: [
+      { id: "create", label: "Create reports", kind: "create", perm: "reports.create" },
+      { id: "library", label: "Report library", kind: "reports", tabs: LIBRARY_TABS },
+      { id: "builder", label: "Report builder", kind: "analytics", section: "builder", perm: "__builder__" },
+      { id: "pdf-exports", label: "PDF exports", kind: "export", perm: "reports.create" },
+      { id: "excel-exports", label: "Excel exports", kind: "excel", perm: "__excel__" },
     ],
   },
   {
@@ -115,95 +207,77 @@ export const NAV = [
     items: [
       { id: "import", label: "Import", kind: "import", perm: "__import__" },
       { id: "explore", label: "Explore", kind: "explore", perm: "__explore__" },
-      { id: "export", label: "Export", kind: "export", perm: "reports.create" },
-      { id: "excel", label: "Excel", kind: "excel", perm: "__excel__" },
-    ],
-  },
-  {
-    id: "sales",
-    label: "Sales",
-    items: [
-      { id: "sales", label: "Sales invoices", kind: "sales", perm: "sales.view" },
-      { id: "returns", label: "Sales returns", kind: "data", type: "credit_note", perm: "credit_note.view" },
-      { id: "items", label: "Item-wise sales", kind: "items", perm: "items.view" },
-    ],
-  },
-  {
-    id: "customers",
-    label: "360 View",
-    items: [
-      { id: "business", label: "Business", kind: "business", perm: "customer.view" },
-      { id: "customers", label: "Customers", kind: "customers", perm: "customer.view" },
-      { id: "items", label: "Items", kind: "items360", perm: "stock.view" },
-      { id: "item-category", label: "Category", kind: "item-dim", dimension: "category", perm: "stock.view" },
-      { id: "item-group", label: "Item group", kind: "item-dim", dimension: "item_group", perm: "stock.view" },
-      { id: "brand", label: "Brand", kind: "item-dim", dimension: "brand", perm: "stock.view" },
-      { id: "supplier", label: "Supplier", kind: "item-dim", dimension: "supplier", perm: "stock.view" },
-      { id: "groups", label: "Customer group", kind: "groups", perm: "customer.view" },
-      { id: "reps", label: "Sales rep", kind: "reps", perm: "customer.view" },
-    ],
-  },
-  {
-    id: "finance",
-    label: "Finance",
-    items: [
-      { id: "party", label: "Parties", kind: "data", type: "party", perm: "party.view" },
-      { id: "arr", label: "Outstanding", kind: "data", type: "arr", perm: "arr.view" },
-      { id: "receipt", label: "Receipts", kind: "data", type: "receipt", perm: "receipt.view" },
-      { id: "credit_note", label: "Credit notes", kind: "data", type: "credit_note", perm: "credit_note.view" },
-      { id: "payments", label: "Payments", kind: "data", type: "payments", perm: "payments.view" },
-      { id: "cash", label: "Cash", kind: "cash", perm: "payments.view" },
-    ],
-  },
-  {
-    id: "stock",
-    label: "Stock",
-    items: [
-      { id: "stock", label: "Stock", kind: "stock", perm: "stock.view" },
-    ],
-  },
-  {
-    id: "reports",
-    label: "Reports",
-    items: [
-      { id: "create", label: "Create", kind: "create", perm: "reports.create" },
-      { id: "performance", label: "Performance", kind: "reports", family: "Performance", perm: "reports.view.performance" },
-      { id: "followup", label: "Follow-up", kind: "reports", family: "Follow-up", perm: "reports.view.followup" },
-      { id: "monthly", label: "Monthly", kind: "reports", family: "Monthly", perm: "reports.view.monthly" },
-      { id: "items", label: "Items", kind: "reports", family: "Items", perm: "reports.view.items" },
-      { id: "profit", label: "Profit", kind: "reports", family: "Profit", perm: "reports.view.profit" },
-      { id: "issues", label: "Data issues", kind: "reports", family: "Data issues", perm: "reports.view.issues" },
-      { id: "scorecard", label: "Scorecard", kind: "analytics", section: "scorecard", perm: "reports.view.scorecard" },
-      { id: "sales-change", label: "Sales change", kind: "analytics", section: "sales-change", perm: "reports.view.scorecard" },
-      { id: "customer-movement", label: "Customer movement", kind: "analytics", section: "customer-movement", perm: "reports.view.scorecard" },
-      { id: "today", label: "Today", kind: "analytics", section: "today", perm: "reports.view.followup" },
-      { id: "collection-worklist", label: "Collection worklist", kind: "analytics", section: "collection", perm: "reports.view.followup" },
-      { id: "stock-decisions", label: "Stock decisions", kind: "analytics", section: "stock", perm: "reports.view.items" },
-      { id: "data-quality", label: "Data quality", kind: "analytics", section: "quality", perm: "reports.view.quality" },
-      { id: "weekly-review", label: "Weekly review", kind: "analytics", section: "review", perm: "reports.view.scorecard" },
-      { id: "reorder", label: "Reorder", kind: "analytics", section: "reorder", perm: "reports.view.items" },
-      { id: "report-builder", label: "Report builder", kind: "analytics", section: "builder", perm: "__builder__" },
+      { id: "quality", label: "Data quality", kind: "analytics", section: "quality", perm: "reports.view.quality" },
+      { id: "issue-reports", label: "Data issue reports", kind: "reports", family: "Data issues", perm: "reports.view.issues" },
     ],
   },
   {
     id: "settings",
     label: "Settings",
     items: [
-      { id: "network", label: "Network", kind: "settings", section: "network", perm: "__home__" },
-      { id: "organization", label: "Organization", kind: "settings", section: "organization", perm: "settings.advanced" },
-      { id: "license", label: "Plan and support", kind: "settings", section: "license", perm: "settings.advanced" },
-      { id: "account-names", label: "Account migrations", kind: "settings", section: "account-names", perm: "settings.advanced" },
-      { id: "settlement", label: "Settlement", kind: "settings", section: "settlement", perm: "settings.advanced" },
-      { id: "due-days", label: "Due days", kind: "settings", section: "due-days", perm: "settings.advanced" },
-      { id: "order-check", label: "Order check", kind: "settings", section: "order-check", perm: "settings.advanced" },
-      { id: "party-types", label: "Party types", kind: "settings", section: "party-types", perm: "settings.advanced" },
-      { id: "audit", label: "Audit", kind: "settings", section: "audit", perm: "settings.advanced" },
-      { id: "advanced", label: "Advanced", kind: "settings", section: "advanced", perm: "settings.advanced" },
-      { id: "users", label: "Users", kind: "settings", section: "users", perm: "users.view" },
-      { id: "roles", label: "Roles", kind: "settings", section: "roles", perm: "roles.view" },
+      { id: "organization", label: "Organization", kind: "settings", tabs: SETTINGS_TABS.organization },
+      { id: "business-rules", label: "Business rules", kind: "settings", tabs: SETTINGS_TABS["business-rules"] },
+      { id: "users-roles", label: "Users and roles", kind: "settings", tabs: SETTINGS_TABS["users-roles"] },
+      { id: "system-support", label: "System and support", kind: "settings", tabs: SETTINGS_TABS["system-support"] },
     ],
   },
 ];
+
+export const ALIASES = {
+  "home/home": { tab: "overview", sub: "dashboard" },
+  "reports/today": { tab: "overview", sub: "today" },
+  "customers/business": { tab: "overview", sub: "business" },
+  "reports/scorecard": { tab: "overview", sub: "scorecard" },
+  "reports/weekly-review": { tab: "overview", sub: "weekly-review" },
+  "sales/sales": { tab: "sales", sub: "invoices" },
+  "sales/returns": { tab: "sales", sub: "returns-credit-notes" },
+  "finance/credit_note": { tab: "sales", sub: "returns-credit-notes" },
+  "sales/items": { tab: "sales", sub: "item-wise" },
+  "customers/reps": { tab: "sales", sub: "reps" },
+  "reports/sales-change": { tab: "sales", sub: "change" },
+  "customers/customers": { tab: "customers", sub: "list" },
+  "customers/groups": { tab: "customers", sub: "groups" },
+  "reports/customer-movement": { tab: "customers", sub: "movement" },
+  "reports/collection-worklist": { tab: "finance", sub: "collection-worklist" },
+  "finance/arr": { tab: "finance", sub: "outstanding" },
+  "finance/receipt": { tab: "finance", sub: "receipts" },
+  "finance/payments": { tab: "finance", sub: "payments" },
+  "finance/cash": { tab: "finance", sub: "cash" },
+  "finance/party": { tab: "finance", sub: "parties" },
+  "stock/stock": { tab: "inventory", sub: "stock" },
+  "customers/items": { tab: "inventory", sub: "item-profiles" },
+  "customers/item-category": { tab: "inventory", sub: "categories" },
+  "customers/item-group": { tab: "inventory", sub: "item-groups" },
+  "customers/brand": { tab: "inventory", sub: "brands" },
+  "customers/supplier": { tab: "inventory", sub: "suppliers" },
+  "reports/stock-decisions": { tab: "inventory", sub: "stock-decisions" },
+  "reports/reorder": { tab: "inventory", sub: "reorder" },
+  "reports/create": { tab: "reports", sub: "create" },
+  "reports/performance": { tab: "reports", sub: "library", section: "performance" },
+  "reports/followup": { tab: "reports", sub: "library", section: "followup" },
+  "reports/monthly": { tab: "reports", sub: "library", section: "monthly" },
+  "reports/items": { tab: "reports", sub: "library", section: "items" },
+  "reports/profit": { tab: "reports", sub: "library", section: "profit" },
+  "reports/report-builder": { tab: "reports", sub: "builder" },
+  "data/export": { tab: "reports", sub: "pdf-exports" },
+  "data/excel": { tab: "reports", sub: "excel-exports" },
+  "data/import": { tab: "data", sub: "import" },
+  "data/explore": { tab: "data", sub: "explore" },
+  "reports/data-quality": { tab: "data", sub: "quality" },
+  "reports/issues": { tab: "data", sub: "issue-reports" },
+  "settings/organization": { tab: "settings", sub: "organization", section: "organization" },
+  "settings/account-names": { tab: "settings", sub: "organization", section: "account-names" },
+  "settings/party-types": { tab: "settings", sub: "organization", section: "party-types" },
+  "settings/settlement": { tab: "settings", sub: "business-rules", section: "settlement" },
+  "settings/due-days": { tab: "settings", sub: "business-rules", section: "due-days" },
+  "settings/order-check": { tab: "settings", sub: "business-rules", section: "order-check" },
+  "settings/users": { tab: "settings", sub: "users-roles", section: "users" },
+  "settings/roles": { tab: "settings", sub: "users-roles", section: "roles" },
+  "settings/network": { tab: "settings", sub: "system-support", section: "network" },
+  "settings/license": { tab: "settings", sub: "system-support", section: "license" },
+  "settings/audit": { tab: "settings", sub: "system-support", section: "audit" },
+  "settings/advanced": { tab: "settings", sub: "system-support", section: "advanced" },
+};
 
 export const PERMISSION_GROUPS = [
   {
@@ -369,22 +443,66 @@ export function can(user, perm) {
   return perms.includes(perm);
 }
 
+export function permittedTabs(user, item) {
+  return (item?.tabs || []).filter((tab) => can(user, tab.perm));
+}
+
+export function destinationAllowed(user, item) {
+  if (!item) return false;
+  if (item.tabs?.length) return permittedTabs(user, item).length > 0;
+  return can(user, item.perm);
+}
+
 export function visibleNav(user) {
   return NAV.map((tab) => ({
     ...tab,
-    items: tab.items.filter((item) => can(user, item.perm)),
+    items: tab.items.filter((item) => destinationAllowed(user, item)),
   })).filter((tab) => tab.items.length);
+}
+
+export function resolveRoute(tab, sub) {
+  const alias = ALIASES[String(tab || "") + "/" + String(sub || "")];
+  if (alias) return { tab: alias.tab, sub: alias.sub, section: alias.section || "" };
+  return { tab, sub, section: "" };
+}
+
+function rememberedSection(itemId, allowedIds) {
+  try {
+    const stored = sessionStorage.getItem("vay-tab:nav:" + itemId);
+    if (stored && allowedIds.includes(stored)) return stored;
+  } catch {
+    /* private mode */
+  }
+  return "";
+}
+
+export function chooseSection(user, item, explicit) {
+  const tabs = permittedTabs(user, item);
+  if (!tabs.length) return "";
+  if (explicit && tabs.some((tab) => tab.id === explicit)) {
+    try {
+      sessionStorage.setItem("vay-tab:nav:" + item.id, explicit);
+    } catch {
+      /* private mode */
+    }
+    return explicit;
+  }
+  const remembered = rememberedSection(item.id, tabs.map((tab) => tab.id));
+  if (remembered) return remembered;
+  return tabs[0].id;
 }
 
 export function firstRoute(user) {
   const tabs = visibleNav(user);
-  const home = tabs.find((t) => t.id === "home");
-  if (home?.items[0]) return { tab: home.id, sub: home.items[0].id };
-  if (!tabs.length) return { tab: "home", sub: "home" };
-  return { tab: tabs[0].id, sub: tabs[0].items[0].id };
+  const overview = tabs.find((group) => group.id === "overview");
+  const dashboard = overview?.items.find((item) => item.id === "dashboard");
+  if (dashboard) return { tab: "overview", sub: "dashboard", section: "" };
+  if (!tabs.length || !tabs[0].items[0]) return { tab: "overview", sub: "dashboard", section: "" };
+  return { tab: tabs[0].id, sub: tabs[0].items[0].id, section: "" };
 }
 
 export function findItem(tabId, subId) {
-  const tab = NAV.find((t) => t.id === tabId);
-  return (tab?.items || []).find((i) => i.id === subId) || null;
+  const resolved = resolveRoute(tabId, subId);
+  const tab = NAV.find((group) => group.id === resolved.tab);
+  return (tab?.items || []).find((item) => item.id === resolved.sub) || null;
 }
