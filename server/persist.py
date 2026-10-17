@@ -176,10 +176,10 @@ def preview_persist(store, type_name, prepared, event_mode="skip", rejects=None)
 
 
 def _stamp_prepared(store, type_name, prepared):
-    """Write NO_REP and NO_GROUP onto rows before they are saved."""
+    """Write No Rep and No Group onto rows before they are saved."""
     from vay.credit_notes import rep_index
     from vay.dates import clean_text, parse_date
-    from vay.row_defaults import stamp_fields
+    from vay.row_defaults import real_group, stamp_fields
 
     groups = {}
     known = set()
@@ -191,7 +191,7 @@ def _stamp_prepared(store, type_name, prepared):
             group = clean_text(fields.get("Group"))
             if name:
                 known.add(name)
-                if group and group != "NO_GROUP" and name not in groups:
+                if real_group(group) and name not in groups:
                     groups[name] = group
     for row in store.rows_of_type("sales"):
         fields = row.get("fields") or {}
@@ -331,6 +331,8 @@ def persist_type(
         from server.entities import stamp_prepared_entities
 
         prepared = stamp_prepared_entities(store, type_name, prepared)
+    if type_name in ("sales", "receipt", "credit_note", "arr"):
+        prepared = _stamp_prepared(store, type_name, prepared)
     persist_prepared(
         store,
         type_name,

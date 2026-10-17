@@ -7,6 +7,7 @@ Collection only counts receipt Account Names in ctx['customer_accounts'] when th
 """
 
 from vay.credit_notes import rep_index, rep_on_or_before
+from vay.row_defaults import real_group
 from vay.config import (
     DEFAULT_GROUP,
     DEFAULT_PARTY,
@@ -258,7 +259,7 @@ def account_performance(tables, ctx):
         if not name:
             continue
         a = ensure(name)
-        a["group"] = clean_text(arr.get(r, "Group")) or DEFAULT_GROUP
+        a["group"] = real_group(arr.get(r, "Group")) or DEFAULT_GROUP
         a["balance"] = number_(arr.get(r, "Balance"))
         a["arDays"] = number_(arr.get(r, "Days")) if "Days" in arr.index else 0
 
@@ -538,7 +539,7 @@ def source_data_warnings(tables, ctx, selected_phases, inventory=None):
             rep = clean_text(sales.get(r, "Sales Rep"))
             if party == DEFAULT_PARTY or not party:
                 no_party += 1
-            if rep == DEFAULT_SALES_REP or not rep:
+            if not rep or rep in (DEFAULT_SALES_REP, "NO_REP"):
                 no_rep += 1
             if party and party.lower() not in arr_names:
                 unmatched.setdefault(party.lower(), {"name": party, "count": 0})

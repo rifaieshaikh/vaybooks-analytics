@@ -5,7 +5,7 @@ Figures come from the same payloads the screens already show.
 
 from vay.export_excel import write_workbook
 
-from server.customers import stated_money
+from server.customers import _detail_bands, stated_money
 
 
 def _blank(value):
@@ -41,17 +41,14 @@ def statement_reports(detail):
         ],
     }
     buckets = detail.get("owe_buckets") or {}
+    bands = _detail_bands(detail)
     aging = {
         "id": "statement_aging",
         "headers": ["Band", "Amount"],
         "text_headers": ["Band"],
         "rows": [
-            ["0-15", buckets.get("d0_15") or 0],
-            ["15-30", buckets.get("d15_30") or 0],
-            ["30-45", buckets.get("d30_45") or 0],
-            ["45-60", buckets.get("d45_60") or 0],
-            ["60-90", buckets.get("d60_90") or 0],
-            ["90+", buckets.get("d90") or 0],
+            [band.get("label") or band.get("key") or "", buckets.get(band.get("key")) or 0]
+            for band in bands
         ],
     }
     invoices = {

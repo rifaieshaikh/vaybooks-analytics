@@ -64,6 +64,19 @@ export function ageKeysFrom(buckets, bands) {
   return AGE_KEYS;
 }
 
+/** Columns for a directory or statement. Prefer configured bands the rows actually have. */
+export function columnsFor(bands, rows) {
+  const configured = Array.isArray(bands) && bands.length ? bands : null;
+  const sample = (rows || []).find((row) => row) || {};
+  const buckets = sample.owe_buckets || {};
+  const has = (key) => sample[key] != null || buckets[key] != null;
+  if (configured && configured.some((band) => band?.key && has(band.key))) return configured;
+  const present = Object.keys(buckets).filter(Boolean);
+  if (present.length) return present.map((key) => ({ key, label: ageLabel(key, configured) }));
+  if (configured) return configured;
+  return AGE_KEYS.map((key) => ({ key, label: AGE_LABELS[key] }));
+}
+
 export function ageLabel(key, bands) {
   if (Array.isArray(bands)) {
     const hit = bands.find((b) => b.key === key);

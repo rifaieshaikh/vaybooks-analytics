@@ -647,6 +647,7 @@ def snapshot_list_customers(store, params, views):
         "attention": (views.get("directory") or {}).get("attention") or [],
         "as_of": views.get("as_of") or "",
         "from_snapshot": True,
+        "aging_bands": (views.get("directory") or {}).get("aging_bands") or [],
     }
 
 
@@ -897,7 +898,6 @@ _CUSTOMER_LIST_FIELDS = (
     "uk", "name", "group", "salesperson", "status", "status_label",
     "last_sale", "last_sale_label", "due", "credit",
     "balance_diff", "balance_issue", "ordered_overdue", "premium", "blacklisted",
-    "d0_15", "d15_30", "d30_45", "d45_60", "d60_90", "d90",
 )
 
 
@@ -922,14 +922,44 @@ def slim_item_list(payload):
     return out
 
 
+def _list_band_keys(payload, rows):
+    keys = []
+    seen = set()
+    for band in payload.get("aging_bands") or []:
+        key = (band or {}).get("key") if isinstance(band, dict) else ""
+        if key and key not in seen:
+            keys.append(key)
+            seen.add(key)
+    for row in rows or []:
+        buckets = (row or {}).get("owe_buckets") or {}
+        for key in list(buckets.keys()) + [k for k in BUCKET_KEYS if k in (row or {})]:
+            if key and key not in seen:
+                keys.append(key)
+                seen.add(key)
+    if keys:
+        return keys
+    return list(BUCKET_KEYS)
+
+
 def slim_customer_list(payload):
     """Columns the directory table shows. The saved directory stays complete."""
     out = dict(payload or {})
     out.pop("attention", None)
-    out["customers"] = [
-        {key: (row or {}).get(key) for key in _CUSTOMER_LIST_FIELDS}
-        for row in (out.get("customers") or [])
-    ]
+    rows = out.get("customers") or []
+    band_keys = _list_band_keys(out, rows)
+    customers = []
+    for row in rows:
+        row = row or {}
+        buckets = row.get("owe_buckets") or {}
+        item = {key: row.get(key) for key in _CUSTOMER_LIST_FIELDS}
+        for key in band_keys:
+            val = row.get(key)
+            if val is None:
+                val = buckets.get(key)
+            if val is not None:
+                item[key] = val
+        customers.append(item)
+    out["customers"] = customers
     return out
 
 
@@ -963,6 +993,7 @@ def snapshot_list_groups(store, params, views):
         "sort": clean_text(params.get("sort") or "due"),
         "dir": clean_text(params.get("dir") or "desc") or "desc",
         "from_snapshot": True,
+        "aging_bands": (views.get("directory") or {}).get("aging_bands") or [],
     }
 
 
@@ -1130,6 +1161,7 @@ def snapshot_list_reps(store, params, views):
         "sort": clean_text(params.get("sort") or "ytd_sales"),
         "dir": clean_text(params.get("dir") or "desc") or "desc",
         "from_snapshot": True,
+        "aging_bands": (views.get("directory") or {}).get("aging_bands") or [],
     }
 
 

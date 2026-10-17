@@ -23,7 +23,8 @@ def _fill_blank(rows, col_index, default):
         if col_index >= len(row):
             continue
         v = row[col_index]
-        if v == "" or v is None:
+        text = clean_text(v)
+        if v == "" or v is None or text == "NO_REP":
             row[col_index] = default
 
 
@@ -68,13 +69,15 @@ def preprocess(tables):
             rows.append(row)
         tables["arr"] = Table("arr", arr.headers, rows)
 
+    from vay.row_defaults import real_group
+
     group_map = {}
     arr = tables.get("arr")
     if arr is not None:
         for r in arr.rows:
             account = clean_text(arr.get(r, "Account Name"))
             if account:
-                group_map[account.lower()] = clean_text(arr.get(r, "Group")) or DEFAULT_GROUP
+                group_map[account.lower()] = real_group(arr.get(r, "Group")) or DEFAULT_GROUP
 
     sales = tables.get("sales")
     if sales is not None:

@@ -133,7 +133,7 @@ def test_blank_rep_and_group_are_filled_on_ingest():
         groups=groups,
         known=known,
     )
-    assert sale["Sales Rep"] == "NO_REP"
+    assert sale["Sales Rep"] == "No Rep"
     assert sale["Group"] == "South"
     receipt = stamp_fields(
         {"Account Name": "Edge Point", "Amount": 5, "Sales Rep": "INVESTMENT"},
@@ -159,8 +159,8 @@ def test_blank_rep_and_group_are_filled_on_ingest():
         reps=reps,
         known=known,
     )
-    assert orphan["Sales Rep"] == "NO_REP"
-    assert orphan["Group"] == "NO_GROUP"
+    assert orphan["Sales Rep"] == "No Rep"
+    assert orphan["Group"] == "No Group"
 
 
 def test_mismatch_includes_receipts_without_rep():

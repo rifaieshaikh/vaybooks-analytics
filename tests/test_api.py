@@ -71,6 +71,36 @@ def test_upload_without_mapper_uses_defaults():
     assert r.json()["types"]["sales"]["added"] == 1
 
 
+def test_outstanding_without_group_column_is_saved_as_no_group():
+    c = client()
+    data = xlsx_bytes([("arr", ["Account Name", "Balance"], [["Acme", 10]])])
+    preview = c.post("/api/uploads/preview", files={"file": ("t.xlsx", data, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
+    assert preview.status_code == 200
+    sheet = preview.json()["sheets"][0]
+    assert "Group" not in sheet["missing"]
+    assert sheet["ready"] is True
+    uploaded = c.post("/api/uploads", files={"file": ("t.xlsx", data, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
+    assert uploaded.status_code == 200
+    assert uploaded.json()["types"]["arr"]["upserted"] == 1
+    rows = c.get("/api/rows", params={"type": "arr"}).json()["rows"]
+    assert rows[0]["fields"]["Group"] == "No Group"
+
+
+def test_sales_without_rep_column_is_saved_as_no_rep():
+    c = client()
+    data = xlsx_bytes([("sales", ["Date", "Party Name", "Net Amount"], [["19-09-24", "Acme", 10]])])
+    preview = c.post("/api/uploads/preview", files={"file": ("t.xlsx", data, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
+    assert preview.status_code == 200
+    sheet = preview.json()["sheets"][0]
+    assert "Sales Rep" not in sheet["missing"]
+    assert sheet["ready"] is True
+    uploaded = c.post("/api/uploads", files={"file": ("t.xlsx", data, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
+    assert uploaded.status_code == 200
+    assert uploaded.json()["types"]["sales"]["added"] == 1
+    rows = c.get("/api/rows", params={"type": "sales"}).json()["rows"]
+    assert rows[0]["fields"]["Sales Rep"] == "No Rep"
+
+
 def test_preview_shows_rows_and_mapping():
     c = client()
     data = xlsx_bytes([("sales", ["Bill Date", "Customer", "Rep", "Amount", "Invoice No"], [["19-09-24", "Acme", "R", 10, "INV-1"]])])
@@ -80,6 +110,8 @@ def test_preview_shows_rows_and_mapping():
     assert sheet["type"] == "sales"
     assert sheet["row_count"] == 1
     assert sheet["sample"]
+    assert sheet["header_samples"]["Bill Date"] == "19-09-24"
+    assert sheet["header_samples"]["Customer"] == "Acme"
     assert sheet["column_map"]["Bill Date"] == "Date"
     assert sheet["column_map"]["Customer"] == "Party Name"
     assert "Invoice No" in sheet["column_map"].values() or sheet["column_map"].get("Invoice No") == "Invoice No"
@@ -575,6 +607,44 @@ def test_settlement_settings_setup_and_bands():
     assert bad.status_code == 400
     # restore defaults
     c.post("/api/settings/settlement", json={"mode": "oldest", "aging_bands": None})
+
+
+def test_customer_list_and_statement_use_configured_bands():
+    c = client()
+    bands = [
+        {"key": "fresh", "label": "0–10", "max_days": 10},
+        {"key": "old", "label": "10+", "max_days": None},
+    ]
+    saved = c.post("/api/settings/settlement", json={"mode": "oldest", "aging_bands": bands, "setup_complete": True})
+    assert saved.status_code == 200
+    c.put("/api/mappers/arr", json={"column_map": {}, "unique_key": ["Account Name"]})
+    c.put("/api/mappers/sales", json={"column_map": {}, "unique_key": ["Date", "Party Name", "Sales Rep", "Net Amount", "Invoice No"]})
+    arr = xlsx_bytes([("arr", ["Account Name", "Group", "Balance"], [["Acme", "South", 150]])])
+    sales = xlsx_bytes([("sales", ["Date", "Party Name", "Sales Rep", "Net Amount", "Invoice No"], [
+        ["15-06-24", "Acme", "R", 200, "INV-OLD"],
+        ["15-06-25", "Acme", "R", 100, "INV-NEW"],
+    ])])
+    c.post("/api/uploads", data={"type": "arr"}, files={"file": ("a.xlsx", arr, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
+    c.post("/api/uploads", data={"type": "sales"}, files={"file": ("s.xlsx", sales, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
+    listed = c.get("/api/customers").json()
+    assert [band["key"] for band in listed["aging_bands"]] == ["fresh", "old"]
+    row = listed["customers"][0]
+    assert "fresh" in row and "old" in row
+    assert "d0_15" not in row
+    detail = c.get("/api/customers/%s" % row["uk"]).json()
+    assert [band["key"] for band in detail["aging_bands"]] == ["fresh", "old"]
+    from server.sales_exports import statement_reports
+    labels = [line[0] for line in statement_reports(detail)[1]["rows"]]
+    assert labels == ["0–10", "10+"]
+    pdf = c.get("/api/customers/%s/pdf?view=customer" % row["uk"])
+    assert pdf.status_code == 200
+    assert pdf.content[:4] == b"%PDF"
+    brief = c.get("/api/customers/%s/pdf?view=rep" % row["uk"])
+    assert brief.status_code == 200
+    assert brief.content[:4] == b"%PDF"
+    groups = c.get("/api/groups").json()
+    assert [band["key"] for band in groups["aging_bands"]] == ["fresh", "old"]
+    assert "fresh" in groups["groups"][0]
 
 
 def test_org_policy_and_expense_categories():
@@ -2376,17 +2446,44 @@ def test_create_keeps_previous_run_and_persists_360():
 def test_cleanup_keeps_runs_factory_deletes_runs():
     c = client()
     _seed_core(c)
+    stock = xlsx_bytes([("stock", ["Item Name", "Qty", "P.Price"], [["SKU-A", 8, 4]])])
+    c.post("/api/uploads", data={"type": "stock"}, files={"file": ("k.xlsx", stock, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
     created = c.post("/api/runs", json={"packs": {"core": True}, "report_date": "2024-09-19"})
     rid = created.json()["id"]
     assert c.get("/api/runs/%s" % rid).json()["status"] == "succeeded"
+    assert c.get("/api/rows", params={"type": "customer"}).json()["total"] >= 1
+    assert c.get("/api/rows", params={"type": "stock"}).json()["total"] == 1
     cleaned = c.post("/api/data/cleanup", json={"types": ["sales", "arr", "receipt"]})
     assert cleaned.status_code == 200
     assert c.get("/api/runs/%s" % rid).json()["status"] == "succeeded"
     assert c.get("/api/rows", params={"type": "sales"}).json()["total"] == 0
+    assert c.get("/api/rows", params={"type": "customer"}).json()["total"] >= 1
+    assert c.get("/api/rows", params={"type": "stock"}).json()["total"] == 1
+    saved = c.post("/api/settings/settlement", json={"mode": "oldest", "setup_complete": True})
+    assert saved.status_code == 200
+    assert saved.json()["setup_complete"] is True
     factory = c.post("/api/data/factory-reset")
     assert factory.status_code == 200
-    assert factory.json()["runs_deleted"] >= 1
+    body = factory.json()
+    assert body["runs_deleted"] >= 1
+    assert body["uploads_deleted"] >= 1
+    assert body["mappers_deleted"] >= 1
+    assert body["removed"]["Customers"] >= 1
+    assert body["removed"]["Stock"] >= 1
+    assert body["sessions_deleted"] >= 1
+    store = get_store()
+    assert store.list_rows() == []
+    assert store.list_uploads() == []
+    assert store.list_mappers() == []
+    assert store.list_import_jobs() == []
+    assert store.get_user("admin")
+    assert c.get("/api/auth/me").status_code == 401
+    assert login_as(c, "admin", "admin123").status_code == 200
     assert c.get("/api/runs/%s" % rid).status_code == 404 or c.get("/api/runs").json()["runs"] == []
+    assert c.get("/api/rows", params={"type": "customer"}).json()["total"] == 0
+    assert c.get("/api/rows", params={"type": "party"}).json()["total"] == 0
+    assert c.get("/api/rows", params={"type": "stock"}).json()["total"] == 0
+    assert c.get("/api/settings/settlement").json()["setup_complete"] is False
 
 
 def test_create_exposes_generate_progress():

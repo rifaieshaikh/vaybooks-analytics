@@ -76,9 +76,11 @@ export default function AdvancedSection({ onFactoryReset }) {
     setErr("");
     try {
       const out = await api.factoryReset();
-      setMsg(`Factory reset complete. Removed ${out.total || 0} imported rows and ${out.runs_deleted || 0} report runs.`);
+      setMsg(`Factory reset complete. Removed ${out.total || 0} stored rows, ${out.uploads_deleted || 0} uploaded files, and ${out.runs_deleted || 0} report runs.`);
       setConfirm(null);
+      sessionStorage.removeItem("vay-wizard-dismissed");
       if (onFactoryReset) onFactoryReset();
+      window.location.reload();
     } catch (e) {
       setErr(e.message);
     } finally {
@@ -106,7 +108,7 @@ export default function AdvancedSection({ onFactoryReset }) {
       </div>
       <div className="card">
         <h2>Factory data reset</h2>
-        <p className="muted">Clears imported operational data and every report run with its snapshots. Stock item names stay; quantities reset to zero. Master tags, activities, discontinued marks, users, and settings stay.</p>
+        <p className="muted">Removes imported files, stored rows, column maps, settings, and report runs so the app matches a first-time install. You are signed out. User accounts stay.</p>
         <button className="danger" disabled={busy} onClick={openFactory}>{busy && confirm?.kind === "factory" ? "Resetting…" : "Factory data reset"}</button>
       </div>
       <div className="card">
@@ -145,13 +147,13 @@ export default function AdvancedSection({ onFactoryReset }) {
         <div className="modal-backdrop" onClick={() => { if (!busy) setConfirm(null); }}>
           <div className="modal confirm-modal" onClick={(e) => e.stopPropagation()}>
             <h3>Factory data reset?</h3>
-            <p className="muted">This returns the app to a clean slate for import and Create.</p>
+            <p className="muted">This returns the app to first-time setup and signs you out.</p>
             <ul className="confirm-list">
-              <li>All imported outstanding, sales, item-wise sales, payments, and receipts</li>
-              <li>Stock quantities reset to zero (item names stay)</li>
+              <li>Uploaded files and every stored row, including customers, parties, stock, and item details</li>
+              <li>Column maps, organization settings, and settlement setup</li>
               <li>Every generated report run and its snapshots</li>
             </ul>
-            <p className="muted">Kept: stock items, parties, customers, party types, discontinued marks, logged activities, users, and settings.</p>
+            <p className="muted">Kept: user accounts. You will need to sign in again.</p>
             {err ? <p className="err">{err}</p> : null}
             <div className="modal-actions">
               <button type="button" className="ghost" disabled={busy} onClick={() => setConfirm(null)}>Cancel</button>

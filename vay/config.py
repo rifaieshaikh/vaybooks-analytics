@@ -31,10 +31,10 @@ NUMERIC_FORMAT = "#,##0.00"
 # Do not hard-code pilot account names in formula modules.
 
 FOLLOW_UP_PREFIXES = ["sales_follow_up_", "collection_follow_up_"]
-DEFAULT_SALES_REP = "NO_REP"
+DEFAULT_SALES_REP = "No Rep"
 DEFAULT_RECEIPT_REP = "INVESTMENT"
 DEFAULT_PARTY = "NO_PARTY_NAME"
-DEFAULT_GROUP = "NO_GROUP"
+DEFAULT_GROUP = "No Group"
 
 TEXT_HEADERS = {
     "Status", "Stock Status", "Issue", "Type", "Source", "Key", "Detail",

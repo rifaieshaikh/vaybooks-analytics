@@ -11,7 +11,7 @@ const STEPS = [
   { id: "file", title: "File" },
   { id: "sheets", title: "Sheets" },
   { id: "preview", title: "Preview" },
-  { id: "mapping", title: "Mapping" },
+  { id: "mapping", title: "Columns" },
   { id: "duplicates", title: "Duplicates" },
   { id: "existing", title: "Existing" },
   { id: "progress", title: "Import" },
@@ -34,15 +34,27 @@ function isSkipDest(dest) {
   return !v || v === SKIP_DEST || v === "skip" || v === "(skip)";
 }
 
-function sheetMissing(sheet) {
-  if (!sheet?.type) return ["No import type"];
+function filledWhenAbsent(type) {
+  const names = new Set(["Sales Rep"]);
+  if (type === "arr") names.add("Group");
+  return names;
+}
+
+function mappedDests(sheet) {
   const dests = new Set();
-  (sheet.headers || []).forEach((h) => {
-    const dest = (sheet.column_map || {})[h];
-    if (dest === undefined) dests.add(h);
+  (sheet?.headers || []).forEach((header) => {
+    const dest = (sheet.column_map || {})[header];
+    if (dest === undefined) dests.add(header);
     else if (!isSkipDest(dest)) dests.add(dest);
   });
-  return (REQUIRED_FIELDS[sheet.type] || []).filter((name) => !dests.has(name));
+  return dests;
+}
+
+function sheetMissing(sheet) {
+  if (!sheet?.type) return ["No import type"];
+  const dests = mappedDests(sheet);
+  const optional = filledWhenAbsent(sheet.type);
+  return (REQUIRED_FIELDS[sheet.type] || []).filter((name) => !dests.has(name) && !optional.has(name));
 }
 
 function localReady(sheet) {
@@ -51,11 +63,51 @@ function localReady(sheet) {
   return sheetMissing(sheet).length === 0 && (sheet.unique_key || []).length > 0;
 }
 
+function duplicateDests(sheet) {
+  const counts = {};
+  (sheet?.headers || []).forEach((header) => {
+    const dest = (sheet.column_map || {})[header];
+    if (isSkipDest(dest)) return;
+    const name = dest || header;
+    counts[name] = (counts[name] || 0) + 1;
+  });
+  return Object.keys(counts).filter((name) => counts[name] > 1);
+}
+
 function mappingReady(sheet) {
   if (!sheet || sheet.skip || !sheet.type) return false;
   if (sheet.allowed === false) return false;
-  if (sheet.header_changes?.changed && !sheet.mapping_confirmed) return false;
+  if (duplicateDests(sheet).length) return false;
   return sheetMissing(sheet).length === 0;
+}
+
+function columnChoices(type, columnMap) {
+  const filled = filledWhenAbsent(type);
+  const required = (REQUIRED_FIELDS[type] || []).filter((name) => !filled.has(name));
+  const optional = (REQUIRED_FIELDS[type] || []).filter((name) => filled.has(name));
+  if (type === "items" || type === "stock") optional.push(...ITEM_ATTR_FIELDS);
+  if (type === "sales" || type === "items" || type === "credit_note" || type === "receipt") optional.push("Invoice No");
+  if (type === "sales" || type === "items" || type === "credit_note") optional.push("Taxable Amount", "Tax Amount");
+  const known = new Set(required);
+  const optionalUnique = optional.filter((name) => {
+    if (known.has(name)) return false;
+    known.add(name);
+    return true;
+  });
+  const extra = [];
+  Object.values(columnMap || {}).forEach((dest) => {
+    if (isSkipDest(dest) || !dest || known.has(dest)) return;
+    known.add(dest);
+    extra.push(dest);
+  });
+  return { required, optional: optionalUnique, extra };
+}
+
+function destValue(header, columnMap) {
+  const val = (columnMap || {})[header];
+  if (val === undefined) return header;
+  if (isSkipDest(val)) return SKIP_DEST;
+  return val;
 }
 
 function formatWhen(value) {
@@ -332,88 +384,99 @@ function DryRunDetails({ sheets }) {
   );
 }
 
-function MappingModal({ sheet, onClose, onSave }) {
-  const [columnMap, setColumnMap] = useState(() => ({ ...(sheet.column_map || {}) }));
-  const fields = useMemo(() => {
-    const req = REQUIRED_FIELDS[sheet.type] || [];
-    const optional = sheet.type === "items" || sheet.type === "stock" ? ITEM_ATTR_FIELDS : [];
-    const fromMap = Object.values(columnMap).filter((d) => !isSkipDest(d));
-    return Array.from(new Set([...req, ...optional, ...fromMap, "Invoice No", "Taxable Amount", "Tax Amount"]));
-  }, [sheet.type, columnMap]);
+function MatchColumns({ sheet, onChange }) {
+  const choices = columnChoices(sheet.type, sheet.column_map);
+  const missing = sheetMissing(sheet);
+  const duplicates = duplicateDests(sheet);
+  const samples = sheet.header_samples || {};
 
-  const missing = useMemo(() => {
-    const dests = new Set();
-    (sheet.headers || []).forEach((h) => {
-      const dest = columnMap[h];
-      if (dest === undefined) dests.add(h);
-      else if (!isSkipDest(dest)) dests.add(dest);
+  function choose(header, value) {
+    const columnMap = { ...(sheet.column_map || {}), [header]: value };
+    const next = { ...sheet, column_map: columnMap };
+    const stillMissing = sheetMissing(next);
+    onChange({
+      column_map: columnMap,
+      fields: Array.from(new Set([
+        ...choices.required,
+        ...choices.optional,
+        ...Object.values(columnMap).filter((dest) => !isSkipDest(dest)),
+      ])),
+      mapping_touched: true,
+      mapping_confirmed: true,
+      missing: stillMissing,
+      ready: stillMissing.length === 0 && duplicateDests(next).length === 0,
     });
-    return (REQUIRED_FIELDS[sheet.type] || []).filter((name) => !dests.has(name));
-  }, [sheet.headers, sheet.type, columnMap]);
+  }
 
   return (
-    <div className="modal-backdrop map-backdrop" onClick={onClose}>
-      <div className="modal map-modal" onClick={(e) => e.stopPropagation()}>
-        <h3>Set mapping · {sheet.sheet}</h3>
-        <p className="muted">
-          Defaults come from Settings → Data mappers for {friendlyType(sheet.type)}. Map each column, or skip it.
+    <div>
+      <p className="muted">{friendlyType(sheet.type)} · {sheet.row_count} {sheet.row_count === 1 ? "row" : "rows"}. The example is the first value in that column.</p>
+      {sheet.header_changes?.changed ? (
+        <p className="warn">
+          This file’s columns differ from the saved match.
+          {(sheet.header_changes.removed || []).length ? ` No longer in the file: ${sheet.header_changes.removed.join(", ")}.` : ""}
+          {(sheet.header_changes.added || []).length ? ` New columns: ${sheet.header_changes.added.join(", ")}.` : ""}
+          {" "}Check the table, then continue.
         </p>
-        {missing.length ? <p className="warn">Still need: {missing.join(" · ")}</p> : <p className="ok">Required fields are covered.</p>}
-        {sheet.type === "sales" ? (
-          <p>
-            <button
-              type="button"
-              className="secondary"
-              onClick={() => {
-                const preset = {
-                  "Invoice Date": "Date",
-                  "Customer": "Party Name",
-                  "Rep": "Sales Rep",
-                  "Amount": "Net Amount",
-                };
-                setColumnMap((prev) => {
-                  const next = { ...prev };
-                  (sheet.headers || []).forEach((header) => {
-                    if (preset[header]) next[header] = preset[header];
-                  });
-                  return next;
-                });
-                api.applyMapperPreset("sales", "plain_sales").catch(() => {});
-              }}
-            >
-              Use plain sales headers
-            </button>
-          </p>
-        ) : null}
-        <div className="map-modal-list">
-          {(sheet.headers || []).map((src) => {
-            const val = columnMap[src];
-            const selectVal = isSkipDest(val) ? SKIP_DEST : (val || src);
-            return (
-              <div className="map-row" key={src}>
-                <span title={src}>{src}</span>
-                <span className="muted">→</span>
-                <select
-                  value={selectVal}
-                  onChange={(e) => setColumnMap((prev) => ({ ...prev, [src]: e.target.value }))}
-                >
-                  <option value={SKIP_DEST}>Skip column</option>
-                  {fields.map((f) => <option key={f} value={f}>{f}</option>)}
-                </select>
-              </div>
-            );
-          })}
-        </div>
-        <div className="modal-actions">
-          <button type="button" className="secondary" onClick={onClose}>Cancel</button>
-          <button
-            type="button"
-            disabled={missing.length > 0}
-            onClick={() => onSave(columnMap)}
-          >
-            Save mapping
-          </button>
-        </div>
+      ) : null}
+      {missing.length ? (
+        <p className="warn">Choose a column for {missing.join(", ")}.</p>
+      ) : (
+        <p className="ok">Every required field has a column.</p>
+      )}
+      {(sheet.type === "sales" || sheet.type === "receipt") && !mappedDests(sheet).has("Sales Rep") ? (
+        <p className="muted">No Sales Rep column. Each row will be saved as No Rep.</p>
+      ) : null}
+      {sheet.type === "arr" && !mappedDests(sheet).has("Group") ? (
+        <p className="muted">No Group column. Each row will be saved as No Group.</p>
+      ) : null}
+      {duplicates.length ? (
+        <p className="warn">{duplicates.join(", ")} {duplicates.length === 1 ? "is" : "are"} selected for more than one column. Each field can only be used once.</p>
+      ) : null}
+      <div className="table-wrap">
+        <table className="match-table">
+          <thead>
+            <tr>
+              <th>Column in your file</th>
+              <th>Example</th>
+              <th>Imports as</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(sheet.headers || []).map((header) => {
+              const value = destValue(header, sheet.column_map);
+              const known = new Set([...choices.required, ...choices.optional, ...choices.extra, SKIP_DEST]);
+              const keepOwn = value !== SKIP_DEST && !known.has(value);
+              return (
+                <tr key={header}>
+                  <td>{header}</td>
+                  <td className="match-example muted">{samples[header] || "—"}</td>
+                  <td>
+                    <select aria-label={"Imports as for " + header} value={value} onChange={(e) => choose(header, e.target.value)}>
+                      <option value={SKIP_DEST}>Don’t import</option>
+                      <optgroup label="Required">
+                        {choices.required.map((name) => <option key={name} value={name}>{name}</option>)}
+                      </optgroup>
+                      {choices.optional.length ? (
+                        <optgroup label="Optional">
+                          {choices.optional.map((name) => <option key={name} value={name}>{name}</option>)}
+                        </optgroup>
+                      ) : null}
+                      {keepOwn || choices.extra.length ? (
+                        <optgroup label="Other">
+                          {choices.extra.map((name) => (
+                            <option key={name} value={name}>{name === header ? `Keep as “${name}”` : name}</option>
+                          ))}
+                          {keepOwn ? <option value={value}>{value === header ? `Keep as “${value}”` : value}</option> : null}
+                        </optgroup>
+                      ) : null}
+                    </select>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
     </div>
   );
@@ -425,9 +488,9 @@ export default function ImportPage({ onGo, onQueued, busy: reportBusy, run }) {
   const [file, setFile] = useState(null);
   const [sheets, setSheets] = useState([]);
   const [previewTab, setPreviewTab] = useState(0);
+  const [mapTab, setMapTab] = useState(0);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
-  const [mapSheetIdx, setMapSheetIdx] = useState(null);
   const [importSteps, setImportSteps] = useState([]);
   const [importResult, setImportResult] = useState(null);
   const [packs, setPacks] = useState({ core: true, fiscal: true, items: false, profit: false });
@@ -465,9 +528,9 @@ export default function ImportPage({ onGo, onQueued, busy: reportBusy, run }) {
     setFile(null);
     setSheets([]);
     setPreviewTab(0);
+    setMapTab(0);
     setErr("");
     setBusy(false);
-    setMapSheetIdx(null);
     setImportSteps([]);
     setImportResult(null);
     setCreateErr("");
@@ -566,6 +629,9 @@ export default function ImportPage({ onGo, onQueued, busy: reportBusy, run }) {
     if (stepId === "existing") {
       await startImport({ dry_run: false });
       return;
+    }
+    if (stepId === "mapping") {
+      setSheets((prev) => prev.map((s) => (!s.skip && s.type ? { ...s, mapping_confirmed: true } : s)));
     }
     if (step < STEPS.length - 1) setStep((s) => s + 1);
   }
@@ -711,12 +777,11 @@ export default function ImportPage({ onGo, onQueued, busy: reportBusy, run }) {
   const creating = creatingLocal || reportBusy;
 
   const previewSheet = included[previewTab] || included[0];
+  const mapSheet = included[mapTab] || included[0];
   const sampleCols = useMemo(() => {
     if (!previewSheet?.sample?.length) return previewSheet?.headers || [];
     return Array.from(new Set(previewSheet.sample.flatMap((row) => Object.keys(row))));
   }, [previewSheet]);
-
-  const mapTarget = mapSheetIdx != null ? sheets[mapSheetIdx] : null;
 
   return (
     <div>
@@ -837,39 +902,28 @@ export default function ImportPage({ onGo, onQueued, busy: reportBusy, run }) {
 
               {stepId === "mapping" ? (
                 <div>
-                  <h4>Column mapping</h4>
-                  <p className="muted">Defaults come from Settings. Open Set mapping to adjust or skip columns.</p>
-                  <div className="wizard-map-list">
-                    {included.map((s) => {
-                      const idx = sheets.findIndex((x) => x.sheet === s.sheet);
-                      const ready = mappingReady(s);
-                      const missing = sheetMissing(s);
-                      return (
-                        <div className="wizard-map-row" key={s.sheet}>
-                          <div>
-                            <strong>{s.sheet}</strong>
-                            <div className="muted">{friendlyType(s.type)} · {s.row_count} rows</div>
-                            {!ready && missing.length ? <div className="warn">{missing.join(" · ")}</div> : null}
-                            {s.header_changes?.changed ? (
-                              <div className="warn">
-                                Headers changed.
-                                {(s.header_changes.removed || []).length ? ` Removed: ${s.header_changes.removed.join(", ")}.` : ""}
-                                {(s.header_changes.added || []).length ? ` Added: ${s.header_changes.added.join(", ")}.` : ""}
-                                {" "}Confirm the mapping before import.
-                                {s.mapping_confirmed ? null : (
-                                  <div style={{ marginTop: 8 }}>
-                                    <button type="button" onClick={() => updateSheet(idx, { mapping_confirmed: true })}>Confirm mapping</button>
-                                  </div>
-                                )}
-                              </div>
-                            ) : null}
-                          </div>
-                          <span className={"pill " + (ready ? "ok" : "warn")}>{ready ? "Ready" : "Needs mapping"}</span>
-                          <button type="button" className="secondary" onClick={() => setMapSheetIdx(idx)}>Set mapping</button>
-                        </div>
-                      );
-                    })}
-                  </div>
+                  <h4>Match columns</h4>
+                  <p className="muted">Choose what each column in the file means. Use “Don’t import” for columns you want to leave out. Saved matches are filled in when the column names are the same.</p>
+                  {included.length > 1 ? (
+                    <div className="chips">
+                      {included.map((s, i) => (
+                        <button
+                          type="button"
+                          key={s.sheet}
+                          className={mapTab === i ? "" : "secondary"}
+                          onClick={() => setMapTab(i)}
+                        >
+                          {s.sheet}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                  {mapSheet ? (
+                    <MatchColumns
+                      sheet={mapSheet}
+                      onChange={(patch) => updateSheet(sheets.findIndex((row) => row.sheet === mapSheet.sheet), patch)}
+                    />
+                  ) : null}
                 </div>
               ) : null}
 
@@ -1084,36 +1138,6 @@ export default function ImportPage({ onGo, onQueued, busy: reportBusy, run }) {
             </div>
           </div>
         </div>
-      ) : null}
-
-      {mapTarget ? (
-        <MappingModal
-          sheet={mapTarget}
-          onClose={() => setMapSheetIdx(null)}
-          onSave={(columnMap) => {
-            const dests = new Set();
-            (mapTarget.headers || []).forEach((h) => {
-              const dest = columnMap[h];
-              if (dest === undefined) dests.add(h);
-              else if (!isSkipDest(dest)) dests.add(dest);
-            });
-            const missing = (REQUIRED_FIELDS[mapTarget.type] || []).filter((name) => !dests.has(name));
-            updateSheet(mapSheetIdx, {
-              column_map: columnMap,
-              fields: Array.from(new Set([
-                ...(REQUIRED_FIELDS[mapTarget.type] || []),
-                ...(mapTarget.type === "items" || mapTarget.type === "stock" ? ITEM_ATTR_FIELDS : []),
-                ...Object.values(columnMap).filter((d) => !isSkipDest(d)),
-                "Invoice No", "Taxable Amount", "Tax Amount",
-              ])),
-              mapping_touched: true,
-              missing,
-              mapping_confirmed: true,
-              ready: missing.length === 0,
-            });
-            setMapSheetIdx(null);
-          }}
-        />
       ) : null}
 
       {setupGate ? (

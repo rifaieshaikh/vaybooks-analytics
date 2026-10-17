@@ -54,10 +54,13 @@ def test_statement_excel_matches_the_customer_screen():
     due_label = "Advance" if detail.get("credit") else "Amount due"
     due_value = abs(detail.get("due") or 0) if detail.get("credit") else detail.get("due")
     assert flat[due_label] == stated_money(detail, due_value)
-    aging = {row[0]: row[1] for row in rows if row and row[0] in ("0-15", "15-30", "30-45", "45-60", "60-90", "90+")}
+    bands = detail.get("aging_bands") or []
+    labels = {band["label"]: band["key"] for band in bands}
+    aging = {row[0]: row[1] for row in rows if row and row[0] in labels}
     buckets = detail.get("owe_buckets") or {}
-    assert aging["0-15"] == (buckets.get("d0_15") or 0)
-    assert aging["90+"] == (buckets.get("d90") or 0)
+    assert set(aging) == set(labels)
+    assert aging[bands[0]["label"]] == (buckets.get(bands[0]["key"]) or 0)
+    assert aging[bands[-1]["label"]] == (buckets.get(bands[-1]["key"]) or 0)
 
 
 def test_reorder_excel_matches_the_proposal():

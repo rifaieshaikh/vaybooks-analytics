@@ -289,9 +289,37 @@ def mapped_headers(column_map, headers):
     return dests
 
 
+def filled_when_absent(type_name):
+    """Fields saved with a default when the file has no column for them."""
+    names = {"Sales Rep"}
+    if type_name == "arr":
+        names.add("Group")
+    return names
+
+
 def missing_required(type_name, column_map, headers):
     dests = set(mapped_headers(column_map, headers))
-    return [name for name in (REQUIRED_FIELDS.get(type_name) or []) if name not in dests]
+    optional = filled_when_absent(type_name)
+    return [
+        name for name in (REQUIRED_FIELDS.get(type_name) or [])
+        if name not in dests and name not in optional
+    ]
+
+
+def header_samples(headers, values, limit_scan=30):
+    """First non-empty cell for each source column, before mapping."""
+    samples = {header: "" for header in (headers or [])}
+    for raw in (values or [])[:limit_scan]:
+        for i, header in enumerate(headers or []):
+            if samples.get(header):
+                continue
+            cell = json_cell(raw[i] if i < len(raw) else "")
+            text = "" if cell is None else str(cell).strip()
+            if text:
+                samples[header] = text[:80]
+        if all(samples.values()):
+            break
+    return samples
 
 
 def sample_rows(headers, values, column_map, limit=20):
@@ -367,6 +395,7 @@ def preview_frames(store, frames, forced_type=None, overrides=None):
             "skip": skip,
             "label": TYPE_LABELS.get(type_name) or sheet_name,
             "headers": headers,
+            "header_samples": header_samples(headers, values),
             "row_count": len(values),
             "column_map": column_map,
             "unique_key": unique_key,

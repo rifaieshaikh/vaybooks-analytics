@@ -9,6 +9,7 @@ from server.customers import (
     customer_pdf,
     entity_brief_pdf,
     patch_party_type,
+    resolve_list_bands,
 )
 from server.dashboard import serve_dashboard
 from server.due_days import resolve_entity_due_days, save_due_days_override
@@ -203,7 +204,9 @@ def api_list_customers(request: Request, user=Depends(require_user)):
     store = get_store()
     params = dict(request.query_params)
     run, views, stale = views_for_request(store, params)
-    return with_stale(slim_customer_list(snapshot_list_customers(store, params, views)), stale, run)
+    payload = snapshot_list_customers(store, params, views)
+    payload["aging_bands"] = resolve_list_bands(store, payload)
+    return with_stale(slim_customer_list(payload), stale, run)
 
 
 @router.get("/api/customers/{uk}/pdf")
@@ -382,7 +385,9 @@ def api_list_groups(request: Request, user=Depends(require_user)):
     store = get_store()
     params = dict(request.query_params)
     run, views, stale = views_for_request(store, params)
-    return with_stale(snapshot_list_groups(store, params, views), stale, run)
+    payload = snapshot_list_groups(store, params, views)
+    payload["aging_bands"] = resolve_list_bands(store, payload)
+    return with_stale(payload, stale, run)
 
 
 @router.get("/api/groups/{uk}")
@@ -410,7 +415,9 @@ def api_list_reps(request: Request, user=Depends(require_user)):
     store = get_store()
     params = dict(request.query_params)
     run, views, stale = views_for_request(store, params)
-    return with_stale(snapshot_list_reps(store, params, views), stale, run)
+    payload = snapshot_list_reps(store, params, views)
+    payload["aging_bands"] = resolve_list_bands(store, payload)
+    return with_stale(payload, stale, run)
 
 
 @router.get("/api/reps/{uk}")

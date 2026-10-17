@@ -1,3 +1,4 @@
+from server.customers import customer_pdf
 from server.pdf_export import catalog_rows, pdf_filename, report_pdf_bytes, zip_keep_names, zip_without_profit
 
 
@@ -5,6 +6,30 @@ def test_pdf_filename_sanitizes_illegal_chars():
     assert pdf_filename("sales_follow_up_A/B") == "sales_follow_up_A-B.pdf"
     assert pdf_filename("sales_rep_performance_report") == "sales_rep_performance_report.pdf"
     assert pdf_filename("group:south") == "group-south.pdf"
+
+
+def test_customer_pdf_accepts_rupee_and_dashes():
+    detail = {
+        "name": "Alqwa Althakya",
+        "company_name": "Vay Books",
+        "due": 1250.5,
+        "currency_symbol": "₹",
+        "as_of_label": "17 Oct 2026",
+        "insight": {"headline": "Still open — 90–120 days", "action": "Call today"},
+        "open_invoices": [{
+            "date_label": "1 Jun 2026",
+            "invoice": "INV-1",
+            "what": "Sale",
+            "due": 1250.5,
+            "age_days": 100,
+        }],
+    }
+    statement = customer_pdf(detail, view="customer")
+    brief = customer_pdf(detail, view="rep")
+    reminder = customer_pdf(detail, view="reminder")
+    assert statement.startswith(b"%PDF")
+    assert brief.startswith(b"%PDF")
+    assert reminder.startswith(b"%PDF")
 
 
 def test_report_pdf_bytes_are_pdf():

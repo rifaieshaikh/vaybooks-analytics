@@ -1,9 +1,11 @@
 """Mapper and imported-data maintenance routes."""
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 
 from server.auth import assert_perm, require_user, type_perm
 from server.cleanup import cleanup_imported_data, factory_reset
+from server.route_helpers import cookie_kwargs
+from server.settings import SESSION_COOKIE
 from server.mappers import PRESETS, preset_by_id, validate_mapper
 from server.rebuild import rebuild_type
 from server.schemas import CleanupBody, MapperBody
@@ -101,6 +103,8 @@ def cleanup_data(body: CleanupBody | None = None, user=Depends(require_user)):
 
 
 @router.post("/api/data/factory-reset")
-def api_factory_reset(user=Depends(require_user)):
+def api_factory_reset(response: Response, user=Depends(require_user)):
     assert_perm(user, "settings.advanced")
-    return factory_reset(get_store())
+    result = factory_reset(get_store())
+    response.delete_cookie(SESSION_COOKIE, path=cookie_kwargs()["path"])
+    return result

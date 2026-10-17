@@ -2,9 +2,9 @@ import { useEffect, useState } from "react";
 import SectionTabs, { rememberedTab } from "./SectionTabs";
 import { api } from "./api";
 import { CHART, can } from "./theme";
-import { AGE_KEYS, AGE_LABELS, ageLabel, bandKey, bucketMoney, hashBack, hashGet, hashReturnLabel, hashSet, initials, money, rowBucket } from "./format";
+import { ageLabel, bandKey, bucketMoney, columnsFor, hashBack, hashGet, hashReturnLabel, hashSet, initials, money, rowBucket } from "./format";
 import AgeBar, { ageParts } from "./AgeBar";
-import { EmptyCard, FilterBar, GROUP_FIELDS, GROUP_SORT_OPTIONS, ListPager, MemberCustomersTable, SortTh, toggleSort } from "./FilterBar";
+import { EmptyCard, FilterBar, GROUP_FIELDS, groupSortOptions, ListPager, MemberCustomersTable, SortTh, toggleSort } from "./FilterBar";
 import SettlementsPanel from "./SettlementsPanel";
 import SalesGapsPanel from "./SalesGapsPanel";
 import RepurchasePanel from "./RepurchasePanel";
@@ -43,6 +43,7 @@ function ItemLink({ uk, name, enabled }) {
 }
 
 function Directory({ filters, setFilters, q, setQ, data, page, loading, sort, dir, onSort, onSortChange, onOpen, onPage }) {
+  const bands = columnsFor(data?.aging_bands, data?.groups);
   return (
     <div className="workspace-page aging-page">
       <div className="page-head">
@@ -70,7 +71,7 @@ function Directory({ filters, setFilters, q, setQ, data, page, loading, sort, di
         fields={GROUP_FIELDS}
         sort={sort}
         dir={dir}
-        sortOptions={GROUP_SORT_OPTIONS}
+        sortOptions={groupSortOptions(data?.aging_bands, data?.groups)}
         onSortChange={onSortChange}
       />
       {loading && !data ? <EmptyCard title="Loading groups" copy="Pulling the latest customer groups." /> : null}
@@ -88,8 +89,8 @@ function Directory({ filters, setFilters, q, setQ, data, page, loading, sort, di
                 <SortTh id="status" label="Status" sort={sort} dir={dir} onSort={onSort} />
                 <SortTh id="last_sale" label="Last sale" sort={sort} dir={dir} onSort={onSort} />
                 <SortTh id="due" label="Due" sort={sort} dir={dir} onSort={onSort} className="num" />
-                {AGE_KEYS.map((k) => (
-                  <SortTh key={k} id={k} label={AGE_LABELS[k]} sort={sort} dir={dir} onSort={onSort} className="num" />
+                {bands.map((band) => (
+                  <SortTh key={band.key} id={band.key} label={band.label} sort={sort} dir={dir} onSort={onSort} className="num" />
                 ))}
               </tr>
             </thead>
@@ -110,8 +111,8 @@ function Directory({ filters, setFilters, q, setQ, data, page, loading, sort, di
                   </td>
                   <td className="quiet">{row.last_sale_label || "—"}</td>
                   <td className={"num amount" + (row.credit ? " credit" : "")}>{row.credit ? money(Math.abs(row.due)) : money(row.due)}</td>
-                  {AGE_KEYS.map((k) => (
-                    <td key={k} className="num">{bucketMoney(rowBucket(row, k))}</td>
+                  {bands.map((band) => (
+                    <td key={band.key} className="num">{bucketMoney(rowBucket(row, band.key))}</td>
                   ))}
                 </tr>
               ))}
@@ -343,6 +344,7 @@ function Profile({ detail, runId, canSales, canStock, canEditDueDays, onBack, ba
           sectionPending ? <p className="muted">Loading customers…</p> :
           <MemberCustomersTable
             rows={view.customers}
+            bands={detail.aging_bands}
             extra={{
               id: "rep",
               label: "Salesperson",
@@ -621,7 +623,7 @@ export default function GroupsPage({ user, runId }) {
         sort={sort}
         dir={dir}
         onSort={(id) => {
-          const next = toggleSort(sort, dir, id, ["due", "customers", "last_sale", ...AGE_KEYS]);
+          const next = toggleSort(sort, dir, id, ["due", "customers", "last_sale", ...columnsFor(data?.aging_bands, data?.groups).map((band) => band.key)]);
           setSort(next.sort);
           setDir(next.dir);
         }}

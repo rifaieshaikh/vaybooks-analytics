@@ -554,6 +554,63 @@ class MemoryStore:
         drop = [k for k, v in self.sessions.items() if v.get("username") == username]
         for k in drop:
             self.sessions.pop(k, None)
+        return len(drop)
+
+    def delete_org_sessions(self):
+        names = {row.get("username") for row in self.list_users() if row.get("username")}
+        drop = [key for key, doc in self.sessions.items() if doc.get("username") in names]
+        for key in drop:
+            self.sessions.pop(key, None)
+        return len(drop)
+
+    def delete_all_rows(self):
+        with self.lock:
+            before = len(self.rows)
+            self.rows = [row for row in self.rows if not in_org(row)]
+            return before - len(self.rows)
+
+    def delete_all_mappers(self):
+        keys = []
+        for key, doc in self.mappers.items():
+            legacy = current_org_id() in (None, DEFAULT_ORG) and isinstance(key, str) and "\0" not in key
+            if in_org(doc) or legacy:
+                keys.append(key)
+        for key in keys:
+            self.mappers.pop(key, None)
+        return len(keys)
+
+    def delete_all_import_jobs(self):
+        keys = [key for key, doc in self.import_jobs.items() if in_org(doc)]
+        for key in keys:
+            self.import_jobs.pop(key, None)
+        return len(keys)
+
+    def delete_all_recon_sidecars(self):
+        keys = [key for key, doc in self.recon_sidecars.items() if in_org(doc)]
+        for key in keys:
+            self.recon_sidecars.pop(key, None)
+        return len(keys)
+
+    def delete_all_audit(self):
+        before = len(self.audit_events)
+        self.audit_events = [row for row in self.audit_events if not in_org(row)]
+        return before - len(self.audit_events)
+
+    def delete_all_view_parts(self):
+        want = current_org_id()
+        before = len(self.view_parts)
+        self.view_parts = {
+            key: value
+            for key, value in self.view_parts.items()
+            if want is not None and key[0] != want
+        }
+        return before - len(self.view_parts)
+
+    def delete_all_blobs(self):
+        keys = [key for key, doc in self.blobs.items() if in_org(doc)]
+        for key in keys:
+            self.blobs.pop(key, None)
+        return len(keys)
 
 
 class MongoStore:
@@ -1094,7 +1151,53 @@ class MongoStore:
         return doc
 
     def delete_sessions_for(self, username):
-        self.db.sessions.delete_many({"username": str(username)})
+        result = self.db.sessions.delete_many({"username": str(username)})
+        return result.deleted_count
+
+    def delete_org_sessions(self):
+        names = [row.get("username") for row in self.list_users() if row.get("username")]
+        if not names:
+            return 0
+        result = self.db.sessions.delete_many({"username": {"$in": names}})
+        return result.deleted_count
+
+    def delete_all_rows(self):
+        result = self.db.mapped_rows.delete_many(org_filter())
+        return result.deleted_count
+
+    def delete_all_mappers(self):
+        result = self.db.mappers.delete_many(org_filter())
+        extra = 0
+        if current_org_id() in (None, DEFAULT_ORG):
+            extra = self.db.mappers.delete_many({"_id": {"$not": {"$regex": "\0"}}}).deleted_count
+        return result.deleted_count + extra
+
+    def delete_all_import_jobs(self):
+        result = self.db.import_jobs.delete_many(org_filter())
+        return result.deleted_count
+
+    def delete_all_recon_sidecars(self):
+        result = self.db.recon_sidecars.delete_many(org_filter())
+        return result.deleted_count
+
+    def delete_all_audit(self):
+        result = self.db.audit_events.delete_many(org_filter())
+        return result.deleted_count
+
+    def delete_all_view_parts(self):
+        result = self.db.view_parts.delete_many(org_filter())
+        return result.deleted_count
+
+    def delete_all_blobs(self):
+        want = current_org_id() or DEFAULT_ORG
+        query = {"org_id": want}
+        if want == DEFAULT_ORG:
+            query = {"$or": [{"org_id": want}, {"org_id": {"$exists": False}}, {"org_id": ""}]}
+        removed = 0
+        for doc in list(self.db["fs.files"].find(query, {"_id": 1})):
+            self.delete_blob(doc["_id"])
+            removed += 1
+        return removed
 
 
 def _wrap_invalidate(cls, names):
@@ -1114,6 +1217,7 @@ _WRITE_METHODS = (
     "delete_row",
     "delete_rows_by_upload",
     "delete_rows_of_type",
+    "delete_all_rows",
     "replace_type_rows",
     "insert_run",
     "update_run",

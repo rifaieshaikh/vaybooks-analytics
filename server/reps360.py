@@ -154,6 +154,7 @@ def _rep_rows(store):
     if cached:
         return cached
     data = customer_directory_rows(store)
+    bands = get_aging_bands(store)
     books = _rep_books(store, data["as_of"])
     by_rep = {}
     for row in data["rows"]:
@@ -181,8 +182,8 @@ def _rep_rows(store):
         else:
             last_sale_iso = _iso(last_sale)
             last_sale_label = _fmt_day(last_sale)
-        buckets = sum_due_buckets(members)
-        col = sum_collection_buckets(members)
+        buckets = sum_due_buckets(members, bands)
+        col = sum_collection_buckets(members, bands)
         ordered_overdue = any(m.get("ordered_overdue") for m in members)
         badge = {
             "current_month": any((m.get("ordering_badge") or {}).get("current_month") for m in members),
@@ -244,6 +245,7 @@ def list_reps(store, params):
         "options": options,
         "sort": clean_text(params.get("sort") or "ytd_sales"),
         "dir": clean_text(params.get("dir") or "desc") or "desc",
+        "aging_bands": get_aging_bands(store),
     }
 
 
@@ -327,12 +329,14 @@ def get_rep(store, uk):
         "last_collection": None,
     }
     members = (by_rep.get(key) or {}).get("members") or []
+    mode = get_settlement_mode(store)
+    bands = get_aging_bands(store)
     groups = {}
     for member in members:
         name = member.get("group")
         if not name:
             continue
-        slot = groups.setdefault(name.lower(), _rollup_slot(name))
+        slot = groups.setdefault(name.lower(), _rollup_slot(name, bands=bands))
         slot["name"] = name
         add_member_to_rollup(slot, member)
     last_collection = book.get("last_collection")
@@ -341,8 +345,6 @@ def get_rep(store, uk):
     as_of = data["as_of"]
     sm = _fy_month(store, full)
     fy_start = full.get("fy_start") or fiscal_year_start(as_of, sm)
-    mode = get_settlement_mode(store)
-    bands = get_aging_bands(store)
     # YTD sales/collections for this rep, attributed to each customer group
     party_group = {}
     for member in members:

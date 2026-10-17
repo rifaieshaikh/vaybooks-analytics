@@ -206,6 +206,28 @@ def get_settlement_setup_complete(store):
     return flag in ("yes", "true", "1")
 
 
+def resolve_list_bands(store, payload):
+    """Bands for a directory. Prefer the bands the rows were actually totaled with."""
+    payload = payload or {}
+    rows = payload.get("customers") or payload.get("groups") or payload.get("reps") or []
+    sample = rows[0] if rows else {}
+    buckets = sample.get("owe_buckets") if isinstance(sample.get("owe_buckets"), dict) else {}
+    present = [key for key in buckets if key]
+    if not present:
+        present = [key for key in BUCKET_KEYS if key in sample]
+    saved = payload.get("aging_bands") or []
+    configured = saved if saved else get_aging_bands(store)
+    config_keys = [band.get("key") for band in configured if isinstance(band, dict) and band.get("key")]
+    if config_keys and any(sample.get(key) is not None or buckets.get(key) is not None for key in config_keys):
+        return configured
+    if present:
+        labels = {band.get("key"): band.get("label") for band in configured if isinstance(band, dict)}
+        from vay.settlement import band_labels
+        defaults = band_labels()
+        return [{"key": key, "label": labels.get(key) or defaults.get(key) or key, "max_days": None} for key in present]
+    return configured or default_aging_bands()
+
+
 def get_settlement_settings(store):
     return {
         "mode": get_settlement_mode(store),
@@ -2740,6 +2762,7 @@ def customer_directory_rows(store):
         "attention": attention[:5],
         "options": options,
         "as_of": as_of,
+        "aging_bands": bands,
     }
     book["directory"] = data
     return data
@@ -2860,6 +2883,7 @@ def list_customers(store, params):
         "dir": direction,
         "counts": data["counts"],
         "attention": data["attention"],
+        "aging_bands": get_aging_bands(store),
     }
 
 
@@ -2927,8 +2951,11 @@ def get_customer(store, uk):
     return attach_repurchase(store, detail, party=detail.get("uk") or detail.get("name"))
 
 
-def _safe_pdf(text):
-    return str(text or "")
+def _safe_pdf(text, family="Helvetica"):
+    s = str("" if text is None else text).replace("\x00", " ")
+    if family == "Helvetica":
+        return s.encode("latin-1", "replace").decode("latin-1")
+    return s
 
 
 def money(n):
@@ -2954,6 +2981,9 @@ def _pdf_family(pdf):
         (r"C:\Windows\Fonts\Nirmala.ttf", r"C:\Windows\Fonts\NirmalaB.ttf"),
         (r"C:\Windows\Fonts\segoeui.ttf", r"C:\Windows\Fonts\segoeuib.ttf"),
         ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
+        ("/usr/share/fonts/TTF/DejaVuSans.ttf", "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf"),
+        ("/System/Library/Fonts/Supplemental/Arial Unicode.ttf", "/System/Library/Fonts/Supplemental/Arial Unicode.ttf"),
+        ("/Library/Fonts/Arial Unicode.ttf", "/Library/Fonts/Arial Unicode.ttf"),
     ]
     for regular, bold in pairs:
         if os.path.isfile(regular):
@@ -2966,7 +2996,7 @@ def _pdf_family(pdf):
 def _pdf_line(pdf, family, text, size=10, bold=False, h=6, color=(28, 25, 23)):
     pdf.set_text_color(*color)
     pdf.set_font(family, "B" if bold else "", size)
-    pdf.multi_cell(0, h, _safe_pdf(text), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.multi_cell(0, h, _safe_pdf(text, family), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
 
 def _pdf_table(pdf, family, headers, rows, widths):
@@ -2974,7 +3004,7 @@ def _pdf_table(pdf, family, headers, rows, widths):
     pdf.set_fill_color(15, 61, 46)
     pdf.set_text_color(255, 255, 255)
     for i, h in enumerate(headers):
-        pdf.cell(widths[i], 7, _safe_pdf(h), border=0, fill=True)
+        pdf.cell(widths[i], 7, _safe_pdf(h, family), border=0, fill=True)
     pdf.ln()
     pdf.set_text_color(28, 25, 23)
     pdf.set_font(family, "", 9)
@@ -2982,7 +3012,7 @@ def _pdf_table(pdf, family, headers, rows, widths):
     for row in rows:
         pdf.set_fill_color(248, 250, 249) if fill else pdf.set_fill_color(255, 255, 255)
         for i, val in enumerate(row):
-            pdf.cell(widths[i], 6, _safe_pdf(val), border=0, fill=True)
+            pdf.cell(widths[i], 6, _safe_pdf(val, family), border=0, fill=True)
         pdf.ln()
         fill = not fill
     pdf.set_fill_color(255, 255, 255)
@@ -3031,17 +3061,65 @@ def _pdf_header(pdf, family, title, subtitle, *, fill=(15, 61, 46), badge=""):
     pdf.set_text_color(255, 255, 255)
     pdf.set_font(family, "B", 12)
     pdf.set_xy(16, 5)
-    pdf.cell(120, 7, title, new_x=XPos.RIGHT, new_y=YPos.TOP)
+    pdf.cell(120, 7, _safe_pdf(title, family), new_x=XPos.RIGHT, new_y=YPos.TOP)
     if badge:
         pdf.set_font(family, "B", 9)
-        pdf.cell(0, 7, badge, align="R", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.cell(0, 7, _safe_pdf(badge, family), align="R", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     else:
         pdf.ln(7)
     pdf.set_font(family, "", 9)
     pdf.set_x(16)
-    pdf.cell(0, 5, _safe_pdf(subtitle), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(0, 5, _safe_pdf(subtitle, family), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.set_y(30 if badge else 28)
     pdf.set_text_color(28, 25, 23)
+
+
+def _detail_bands(detail):
+    bands = (detail or {}).get("aging_bands") or default_aging_bands()
+    try:
+        return normalize_aging_bands(bands)
+    except ValueError:
+        return default_aging_bands()
+
+
+def _band_widths(count):
+    count = max(1, int(count or 1))
+    width = round(178.0 / count, 2)
+    widths = [width] * count
+    widths[-1] = round(178.0 - width * (count - 1), 2)
+    return widths
+
+
+def _pdf_bucket_table(pdf, family, buckets, bands):
+    bands = bands or default_aging_bands()
+    headers = [band.get("label") or band.get("key") or "" for band in bands]
+    values = [money((buckets or {}).get(band.get("key"))) for band in bands]
+    _pdf_table(pdf, family, headers, [values], _band_widths(len(headers)))
+
+
+def _late_collection_share(buckets, bands):
+    """Share of collections in bands that start at 60 days or later."""
+    start = 0
+    late_keys = []
+    late_from = None
+    total = 0.0
+    late = 0.0
+    for band in bands or []:
+        key = band.get("key")
+        amount = float((buckets or {}).get(key) or 0)
+        total += amount
+        if start >= 60:
+            if late_from is None:
+                late_from = start
+            late_keys.append(key)
+            late += amount
+        max_days = band.get("max_days")
+        if max_days is None:
+            break
+        start = int(max_days)
+    if not late_keys or total <= 0 or late <= 0:
+        return ""
+    return "%s+ days %.0f%%" % (late_from, 100.0 * late / total)
 
 
 def _pdf_kpi_row(pdf, family, cells):
@@ -3057,11 +3135,11 @@ def _pdf_kpi_row(pdf, family, cells):
         pdf.set_xy(x + 2, y0 + 1)
         pdf.set_font(family, "", 7)
         pdf.set_text_color(120, 113, 108)
-        pdf.cell(w - 6, 4, _safe_pdf(label), new_x=XPos.LEFT, new_y=YPos.NEXT)
+        pdf.cell(w - 6, 4, _safe_pdf(label, family), new_x=XPos.LEFT, new_y=YPos.NEXT)
         pdf.set_x(x + 2)
         pdf.set_font(family, "B", 10)
         pdf.set_text_color(28, 25, 23)
-        pdf.cell(w - 6, 8, _safe_pdf(value)[:22], new_x=XPos.LMARGIN, new_y=YPos.TOP)
+        pdf.cell(w - 6, 8, _safe_pdf(value, family)[:22], new_x=XPos.LMARGIN, new_y=YPos.TOP)
     pdf.set_y(y0 + 18)
 
 
@@ -3084,12 +3162,7 @@ def _customer_statement_pdf(pdf, family, detail):
         _pdf_line(pdf, family, "%s open invoice%s" % (waiting, "" if waiting == 1 else "s"), 10, False, 5, (120, 113, 108))
     pdf.ln(3)
     _pdf_line(pdf, family, "Outstanding by age", 12, True, 7)
-    buckets = detail.get("owe_buckets") or {}
-    _pdf_table(pdf, family, ["0–15", "15–30", "30–45", "45–60", "60–90", "90+"], [[
-        money(buckets.get("d0_15")), money(buckets.get("d15_30")),
-        money(buckets.get("d30_45")), money(buckets.get("d45_60")),
-        money(buckets.get("d60_90")), money(buckets.get("d90")),
-    ]], [30, 30, 30, 30, 29, 29])
+    _pdf_bucket_table(pdf, family, detail.get("owe_buckets") or {}, _detail_bands(detail))
     opens = detail.get("open_invoices") or []
     if opens:
         pdf.ln(3)
@@ -3176,7 +3249,7 @@ def _rep_brief_pdf(pdf, family, detail, *, title="Vay  ·  Sales brief"):
         pdf.set_x(16)
         pdf.set_font(family, "B", 9)
         pdf.set_text_color(28, 25, 23)
-        pdf.multi_cell(178, 6, _safe_pdf("  ·  ".join(flags)), fill=True, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.multi_cell(178, 6, _safe_pdf("  ·  ".join(flags), family), fill=True, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.ln(2)
 
     insight = detail.get("insight") or {}
@@ -3185,7 +3258,7 @@ def _rep_brief_pdf(pdf, family, detail, *, title="Vay  ·  Sales brief"):
         pdf.set_x(16)
         pdf.set_font(family, "", 10)
         pdf.set_text_color(28, 25, 23)
-        pdf.multi_cell(178, 6, _safe_pdf(insight.get("headline")), fill=True, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.multi_cell(178, 6, _safe_pdf(insight.get("headline"), family), fill=True, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.ln(1)
     if insight.get("action"):
         _pdf_line(pdf, family, "Next: " + insight.get("action"), 10, True, 6, (31, 107, 74))
@@ -3279,36 +3352,23 @@ def _rep_brief_pdf(pdf, family, detail, *, title="Vay  ·  Sales brief"):
 
     pdf.ln(2)
     _pdf_line(pdf, family, "What they owe", 12, True, 7)
-    buckets = detail.get("owe_buckets") or {}
-    _pdf_table(pdf, family, ["0–15", "15–30", "30–45", "45–60", "60–90", "90+"], [[
-        money(buckets.get("d0_15")), money(buckets.get("d15_30")),
-        money(buckets.get("d30_45")), money(buckets.get("d45_60")),
-        money(buckets.get("d60_90")), money(buckets.get("d90")),
-    ]], [30, 30, 30, 30, 29, 29])
+    bands = _detail_bands(detail)
+    _pdf_bucket_table(pdf, family, detail.get("owe_buckets") or {}, bands)
 
     col = (detail.get("settlements") or {}).get("overall", {}).get("buckets") or detail.get("collection_buckets") or {}
-    if any(col.get(k) for k in BUCKET_KEYS):
+    if any(col.get(band.get("key")) for band in bands):
         pdf.ln(2)
         _pdf_line(pdf, family, "Settlements by age", 12, True, 7)
         overall_total = (detail.get("settlements") or {}).get("overall", {}).get("total")
-        old_share = 0.0
-        try:
-            total_s = sum(float(col.get(k) or 0) for k in BUCKET_KEYS)
-            old_share = (float(col.get("d60_90") or 0) + float(col.get("d90") or 0)) / total_s if total_s else 0
-        except (TypeError, ValueError, ZeroDivisionError):
-            old_share = 0
         bits_s = []
         if overall_total:
             bits_s.append("Overall %s" % money(overall_total))
-        if old_share:
-            bits_s.append("60+ days %.0f%%" % (100 * old_share))
+        late = _late_collection_share(col, bands)
+        if late:
+            bits_s.append(late)
         if bits_s:
             _pdf_line(pdf, family, "  ·  ".join(bits_s), 9, False, 5, (120, 113, 108))
-        _pdf_table(pdf, family, ["0–15", "15–30", "30–45", "45–60", "60–90", "90+"], [[
-            money(col.get("d0_15")), money(col.get("d15_30")),
-            money(col.get("d30_45")), money(col.get("d45_60")),
-            money(col.get("d60_90")), money(col.get("d90")),
-        ]], [30, 30, 30, 30, 29, 29])
+        _pdf_bucket_table(pdf, family, col, bands)
 
     opens = detail.get("open_invoices") or []
     if opens:

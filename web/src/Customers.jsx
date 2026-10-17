@@ -5,9 +5,9 @@ import CollectionFollowUp from "./CollectionFollowUp";
 import ReminderDraft from "./ReminderDraft";
 import ExplainFigure from "./ExplainFigure";
 import { CHART, can } from "./theme";
-import { AGE_KEYS, AGE_LABELS, ageLabel, bandKey, bucketMoney, hashBack, hashGet, hashReturnLabel, hashSet, initials, money, moneyOrDash, round2, rowBucket } from "./format";
+import { ageLabel, bandKey, bucketMoney, columnsFor, hashBack, hashGet, hashReturnLabel, hashSet, initials, money, moneyOrDash, round2, rowBucket } from "./format";
 import AgeBar, { ageParts } from "./AgeBar";
-import { CUSTOMER_FIELDS, CUSTOMER_SORT_OPTIONS, EmptyCard, FilterBar, ListPager, SortTh, toggleSort } from "./FilterBar";
+import { CUSTOMER_FIELDS, customerSortOptions, EmptyCard, FilterBar, ListPager, SortTh, toggleSort } from "./FilterBar";
 import SettlementsPanel from "./SettlementsPanel";
 import SalesGapsPanel from "./SalesGapsPanel";
 import RepurchasePanel from "./RepurchasePanel";
@@ -17,6 +17,7 @@ import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAx
 
 function StatementPreview({ detail, kind, onClose, onDownload }) {
   const buckets = detail.owe_buckets || {};
+  const bands = columnsFor(detail.aging_bands, [detail]);
   const dueLabel = detail.credit ? "Advance" : "Amount due";
   const dueValue = detail.credit ? Math.abs(detail.due) : detail.due;
   return (
@@ -32,7 +33,7 @@ function StatementPreview({ detail, kind, onClose, onDownload }) {
         <p>{dueLabel} {money(dueValue)}</p>
         <p className="muted">{detail.invoices_waiting || 0} open invoices</p>
         <p className="muted">
-          {AGE_KEYS.map((key) => ageLabel(key) + " " + money(buckets[key] || 0)).join(" · ")}
+          {bands.map((band) => ageLabel(band.key, bands) + " " + money(buckets[band.key] || 0)).join(" · ")}
         </p>
         <p className="muted">The file adds the company name and currency from organization settings.</p>
         <div className="modal-actions">
@@ -88,6 +89,7 @@ function ItemLink({ uk, name, enabled, onOpen }) {
 }
 
 function Directory({ filters, setFilters, q, setQ, data, page, loading, sort, dir, onSort, onSortChange, onOpen, onPage }) {
+  const bands = columnsFor(data?.aging_bands, data?.customers);
   return (
     <div className="workspace-page aging-page">
       <div className="page-head">
@@ -115,7 +117,7 @@ function Directory({ filters, setFilters, q, setQ, data, page, loading, sort, di
         fields={CUSTOMER_FIELDS}
         sort={sort}
         dir={dir}
-        sortOptions={CUSTOMER_SORT_OPTIONS}
+        sortOptions={customerSortOptions(data?.aging_bands, data?.customers)}
         onSortChange={onSortChange}
       />
       {loading && !data ? <EmptyCard title="Loading customers" copy="Pulling the latest directory." /> : null}
@@ -134,8 +136,8 @@ function Directory({ filters, setFilters, q, setQ, data, page, loading, sort, di
                 <SortTh id="last_sale" label="Last sale" sort={sort} dir={dir} onSort={onSort} />
                 <SortTh id="due" label="Due" sort={sort} dir={dir} onSort={onSort} className="num" />
                 <SortTh id="balance_diff" label="AR Diff" sort={sort} dir={dir} onSort={onSort} className="num" />
-                {AGE_KEYS.map((k) => (
-                  <SortTh key={k} id={k} label={AGE_LABELS[k]} sort={sort} dir={dir} onSort={onSort} className="num" />
+                {bands.map((band) => (
+                  <SortTh key={band.key} id={band.key} label={band.label} sort={sort} dir={dir} onSort={onSort} className="num" />
                 ))}
               </tr>
             </thead>
@@ -161,8 +163,8 @@ function Directory({ filters, setFilters, q, setQ, data, page, loading, sort, di
                   <td className="quiet">{c.last_sale_label || "—"}</td>
                   <td className={"num amount" + (c.credit ? " credit" : "")}>{c.credit ? money(Math.abs(c.due)) : money(c.due)}</td>
                   <td className={"num amount" + (Number(c.balance_diff) < 0 ? " credit" : "")}>{moneyOrDash(c.balance_diff)}</td>
-                  {AGE_KEYS.map((k) => (
-                    <td key={k} className="num">{bucketMoney(rowBucket(c, k))}</td>
+                  {bands.map((band) => (
+                    <td key={band.key} className="num">{bucketMoney(rowBucket(c, band.key))}</td>
                   ))}
                 </tr>
               ))}
@@ -1004,7 +1006,7 @@ export default function CustomersPage({ user, runId }) {
         sort={sort}
         dir={dir}
         onSort={(id) => {
-          const next = toggleSort(sort, dir, id, ["due", "balance_diff", "last_sale", ...AGE_KEYS]);
+          const next = toggleSort(sort, dir, id, ["due", "balance_diff", "last_sale", ...columnsFor(data?.aging_bands, data?.customers).map((band) => band.key)]);
           setSort(next.sort);
           setDir(next.dir);
         }}

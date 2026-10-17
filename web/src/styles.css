@@ -1338,6 +1338,15 @@ button.dash-tile .value { font-size: 22px; font-weight: 750; margin-top: 4px; }
   align-items: baseline;
   flex-wrap: wrap;
 }
+.match-table { width: 100%; margin-top: 12px; }
+.match-table th {
+  text-align: left;
+  font-size: 12px;
+  font-weight: 600;
+}
+.match-table td, .match-table th { padding: 8px 10px 8px 0; vertical-align: middle; }
+.match-table select { margin: 0; min-width: 200px; }
+.match-example { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .map-backdrop { z-index: 50; }
 .map-modal {
   width: min(560px, 100%);

@@ -5,6 +5,7 @@ from __future__ import annotations
 from vay.config import DEFAULT_GROUP, DEFAULT_RECEIPT_REP, DEFAULT_SALES_REP
 from vay.credit_notes import credit_party, rep_index, rep_on_or_before, resolve_credit_party
 from vay.dates import clean_text, fiscal_year_start, number_, parse_date
+from vay.row_defaults import real_group
 
 
 def load_book(store):
@@ -72,7 +73,7 @@ def build_book(store):
         group = clean_text(fields.get("Group"))
         if name:
             known_parties.add(name)
-            if group and group != "NO_GROUP" and name not in groups:
+            if real_group(group) and name not in groups:
                 groups[name] = group
 
     credit_notes_by_party = {}

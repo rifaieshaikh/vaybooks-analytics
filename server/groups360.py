@@ -85,8 +85,8 @@ def buying_for_names(store, name_ls, as_of):
 COL_KEYS = tuple("c_" + k for k in BUCKET_KEYS)
 
 
-def sum_due_buckets(members):
-    out = empty_buckets()
+def sum_due_buckets(members, bands=None):
+    out = empty_buckets(bands)
     for member in members or []:
         nested = member.get("owe_buckets") or {}
         for key in out:
@@ -97,8 +97,8 @@ def sum_due_buckets(members):
     return out
 
 
-def sum_collection_buckets(members):
-    out = empty_buckets()
+def sum_collection_buckets(members, bands=None):
+    out = empty_buckets(bands)
     for member in members or []:
         nested = member.get("collection_buckets") or {}
         for key in out:
@@ -108,7 +108,7 @@ def sum_collection_buckets(members):
     return out
 
 
-def _rollup_slot(name, uk=None):
+def _rollup_slot(name, uk=None, bands=None):
     return {
         "uk": uk or account_uk(name),
         "name": name,
@@ -122,7 +122,7 @@ def _rollup_slot(name, uk=None):
         "last_sale_label": "",
         "ytd_sales": 0.0,
         "ytd_collection": 0.0,
-        "owe_buckets": empty_buckets(),
+        "owe_buckets": empty_buckets(bands),
     }
 
 
@@ -219,6 +219,7 @@ def _group_rows(store):
     if cached:
         return cached
     data = customer_directory_rows(store)
+    bands = get_aging_bands(store)
     by_name = {}
     for row in data["rows"]:
         name = clean_text(row.get("group"))
@@ -235,8 +236,8 @@ def _group_rows(store):
         last = max(members, key=lambda m: m.get("last_sale") or "")
         reps = sorted({m.get("salesperson") for m in members if m.get("salesperson")}, key=str.lower)
         status = rollup_status(statuses, due)
-        buckets = sum_due_buckets(members)
-        col = sum_collection_buckets(members)
+        buckets = sum_due_buckets(members, bands)
+        col = sum_collection_buckets(members, bands)
         ordered_overdue = any(m.get("ordered_overdue") for m in members)
         badge = {
             "current_month": any((m.get("ordering_badge") or {}).get("current_month") for m in members),
@@ -296,6 +297,7 @@ def list_groups(store, params):
         "options": options,
         "sort": clean_text(params.get("sort") or "due"),
         "dir": clean_text(params.get("dir") or "desc") or "desc",
+        "aging_bands": get_aging_bands(store),
     }
 
 
@@ -456,7 +458,7 @@ def get_group(store, uk):
         name = member.get("salesperson")
         if not name:
             continue
-        slot = people.setdefault(name.lower(), _rollup_slot(name))
+        slot = people.setdefault(name.lower(), _rollup_slot(name, bands=bands))
         slot["name"] = name
         add_member_to_rollup(slot, member)
     for member in members:

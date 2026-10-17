@@ -1,4 +1,4 @@
-"""Remove imported operational rows. Stock items stay; quantities reset. Factory also clears report runs."""
+"""Remove imported operational rows. Selective cleanup keeps stock items and zeroes quantities. Factory reset returns the organization to a fresh install, keeping users and roles."""
 
 from vay.dates import number_
 
@@ -99,6 +99,42 @@ def delete_all_runs(store):
 
 
 def factory_reset(store):
-    out = cleanup_imported_data(store, list(CLEANUP_TYPES))
-    out["runs_deleted"] = delete_all_runs(store)
-    return out
+    """Drop stored business data so the organization matches a first-time install."""
+    removed = {}
+    total = 0
+    for row in list(store.list_rows() or []):
+        label = TYPE_LABELS.get(row.get("type"), row.get("type") or "other")
+        removed[label] = removed.get(label, 0) + 1
+        total += 1
+    runs_deleted = delete_all_runs(store)
+    uploads_deleted = 0
+    for upload in list(store.list_uploads() or []):
+        uid = upload.get("_id")
+        if uid is None:
+            continue
+        if store.delete_upload(str(uid)):
+            uploads_deleted += 1
+    store.delete_all_rows()
+    mappers_deleted = store.delete_all_mappers()
+    jobs_deleted = store.delete_all_import_jobs()
+    sidecars_deleted = store.delete_all_recon_sidecars()
+    audit_deleted = store.delete_all_audit()
+    store.delete_all_view_parts()
+    files_deleted = store.delete_all_blobs()
+    sessions_deleted = store.delete_org_sessions()
+    invalidate_views_cache()
+    return {
+        "removed": removed,
+        "total": total,
+        "balances_cleared": 0,
+        "stock_reset": 0,
+        "types": [],
+        "runs_deleted": runs_deleted,
+        "uploads_deleted": uploads_deleted,
+        "mappers_deleted": mappers_deleted,
+        "import_jobs_deleted": jobs_deleted,
+        "sidecars_deleted": sidecars_deleted,
+        "audit_deleted": audit_deleted,
+        "files_deleted": files_deleted,
+        "sessions_deleted": sessions_deleted,
+    }

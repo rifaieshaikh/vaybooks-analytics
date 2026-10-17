@@ -2,9 +2,9 @@ import { useEffect, useState } from "react";
 import SectionTabs, { rememberedTab } from "./SectionTabs";
 import { api } from "./api";
 import { CHART, can } from "./theme";
-import { AGE_KEYS, AGE_LABELS, ageLabel, bandKey, bucketMoney, hashBack, hashGet, hashReturnLabel, hashSet, initials, money, rowBucket } from "./format";
+import { ageLabel, bandKey, bucketMoney, columnsFor, hashBack, hashGet, hashReturnLabel, hashSet, initials, money, rowBucket } from "./format";
 import AgeBar, { ageParts } from "./AgeBar";
-import { EmptyCard, FilterBar, ListPager, MemberCustomersTable, REP_FIELDS, REP_SORT_OPTIONS, SortTh, toggleSort } from "./FilterBar";
+import { EmptyCard, FilterBar, ListPager, MemberCustomersTable, REP_FIELDS, repSortOptions, SortTh, toggleSort } from "./FilterBar";
 import SettlementsPanel from "./SettlementsPanel";
 import SalesGapsPanel from "./SalesGapsPanel";
 import RepurchasePanel from "./RepurchasePanel";
@@ -43,6 +43,7 @@ function ItemLink({ uk, name, enabled }) {
 }
 
 function Directory({ filters, setFilters, q, setQ, data, page, loading, sort, dir, onSort, onSortChange, onOpen, onPage }) {
+  const bands = columnsFor(data?.aging_bands, data?.reps);
   return (
     <div className="workspace-page aging-page">
       <div className="page-head">
@@ -70,7 +71,7 @@ function Directory({ filters, setFilters, q, setQ, data, page, loading, sort, di
         fields={REP_FIELDS}
         sort={sort}
         dir={dir}
-        sortOptions={REP_SORT_OPTIONS}
+        sortOptions={repSortOptions(data?.aging_bands, data?.reps)}
         onSortChange={onSortChange}
       />
       {loading && !data ? <EmptyCard title="Loading salespeople" copy="Pulling the latest sales reps." /> : null}
@@ -89,8 +90,8 @@ function Directory({ filters, setFilters, q, setQ, data, page, loading, sort, di
                 <SortTh id="last_sale" label="Last sale" sort={sort} dir={dir} onSort={onSort} />
                 <SortTh id="ytd_sales" label="This year" sort={sort} dir={dir} onSort={onSort} className="num" />
                 <SortTh id="due" label="Due" sort={sort} dir={dir} onSort={onSort} className="num" />
-                {AGE_KEYS.map((k) => (
-                  <SortTh key={k} id={k} label={AGE_LABELS[k]} sort={sort} dir={dir} onSort={onSort} className="num" />
+                {bands.map((band) => (
+                  <SortTh key={band.key} id={band.key} label={band.label} sort={sort} dir={dir} onSort={onSort} className="num" />
                 ))}
               </tr>
             </thead>
@@ -112,8 +113,8 @@ function Directory({ filters, setFilters, q, setQ, data, page, loading, sort, di
                   <td className="quiet">{row.last_sale_label || "—"}</td>
                   <td className="num amount">{money(row.ytd_sales)}</td>
                   <td className={"num amount" + (row.credit ? " credit" : "")}>{row.credit ? money(Math.abs(row.due)) : money(row.due)}</td>
-                  {AGE_KEYS.map((k) => (
-                    <td key={k} className="num">{bucketMoney(rowBucket(row, k))}</td>
+                  {bands.map((band) => (
+                    <td key={band.key} className="num">{bucketMoney(rowBucket(row, band.key))}</td>
                   ))}
                 </tr>
               ))}
@@ -347,6 +348,7 @@ function Profile({ detail, runId, canSales, canStock, canEditDueDays, onBack, ba
           sectionPending ? <p className="muted">Loading customers…</p> :
           <MemberCustomersTable
             rows={view.customers}
+            bands={detail.aging_bands}
             extra={{
               id: "group",
               label: "Group",
@@ -659,7 +661,7 @@ export default function RepsPage({ user, runId }) {
         sort={sort}
         dir={dir}
         onSort={(id) => {
-          const next = toggleSort(sort, dir, id, ["due", "customers", "ytd_sales", "last_sale", ...AGE_KEYS]);
+          const next = toggleSort(sort, dir, id, ["due", "customers", "ytd_sales", "last_sale", ...columnsFor(data?.aging_bands, data?.reps).map((band) => band.key)]);
           setSort(next.sort);
           setDir(next.dir);
         }}

@@ -3,6 +3,7 @@
 from datetime import datetime
 
 from vay.credit_notes import rep_index, rep_on_or_before
+from vay.row_defaults import real_group
 from vay.config import DEFAULT_GROUP, DEFAULT_PARTY, DEFAULT_RECEIPT_REP, DEFAULT_SALES_REP
 from vay.dates import (
     clean_text,
@@ -199,7 +200,7 @@ def _account_months(tables, ctx, fy_years):
     for r in arr.rows:
         name = clean_text(arr.get(r, "Account Name"))
         if name:
-            group_map[name.lower()] = clean_text(arr.get(r, "Group")) or DEFAULT_GROUP
+            group_map[name.lower()] = real_group(arr.get(r, "Group")) or DEFAULT_GROUP
     sales = tables["sales"]
     receipts = tables["receipt"]
     accounts = {}

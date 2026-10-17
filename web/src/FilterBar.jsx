@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { AGE_KEYS, AGE_LABELS, bucketMoney, hashSet, initials, money, rowBucket } from "./format";
+import { ageLabel, bucketMoney, columnsFor, hashSet, initials, money, rowBucket } from "./format";
 
 function prettyDay(iso) {
   if (!iso) return "";
@@ -219,54 +219,69 @@ export const CUSTOMER_FIELDS = [
   { key: "balance_issue", label: "Mismatch" },
 ];
 
-export const DUE_AGE_SORT = [
-  { id: "due", label: "Due", numeric: true },
-  { id: "d0_15", label: "0–15 days", numeric: true },
-  { id: "d15_30", label: "15–30 days", numeric: true },
-  { id: "d30_45", label: "30–45 days", numeric: true },
-  { id: "d45_60", label: "45–60 days", numeric: true },
-  { id: "d60_90", label: "60–90 days", numeric: true },
-  { id: "d90", label: "90+ days", numeric: true },
-];
+export function dueAgeSort(bands, rows) {
+  return columnsFor(bands, rows).map((band) => ({
+    id: band.key,
+    label: (band.label || ageLabel(band.key, bands)) + " days",
+    numeric: true,
+  }));
+}
 
-export const CUSTOMER_SORT_OPTIONS = [
-  { id: "due", label: "Due", numeric: true },
-  { id: "balance_diff", label: "AR Diff", numeric: true },
-  ...DUE_AGE_SORT.slice(1),
-  { id: "last_sale", label: "Last sale", numeric: true },
-  { id: "party", label: "Customer" },
-  { id: "group", label: "Group" },
-  { id: "rep", label: "Salesperson" },
-  { id: "status", label: "Status" },
-];
+export function customerSortOptions(bands, rows) {
+  return [
+    { id: "due", label: "Due", numeric: true },
+    { id: "balance_diff", label: "AR Diff", numeric: true },
+    ...dueAgeSort(bands, rows),
+    { id: "last_sale", label: "Last sale", numeric: true },
+    { id: "party", label: "Customer" },
+    { id: "group", label: "Group" },
+    { id: "rep", label: "Salesperson" },
+    { id: "status", label: "Status" },
+  ];
+}
 
-export const GROUP_SORT_OPTIONS = [
-  ...DUE_AGE_SORT,
-  { id: "customers", label: "Customers", numeric: true },
-  { id: "last_sale", label: "Last sale", numeric: true },
-  { id: "name", label: "Group" },
-  { id: "rep", label: "Salespeople", numeric: true },
-  { id: "status", label: "Status" },
-];
+export function groupSortOptions(bands, rows) {
+  return [
+    { id: "due", label: "Due", numeric: true },
+    ...dueAgeSort(bands, rows),
+    { id: "customers", label: "Customers", numeric: true },
+    { id: "last_sale", label: "Last sale", numeric: true },
+    { id: "name", label: "Group" },
+    { id: "rep", label: "Salespeople", numeric: true },
+    { id: "status", label: "Status" },
+  ];
+}
 
-export const REP_SORT_OPTIONS = [
-  { id: "ytd_sales", label: "This year", numeric: true },
-  ...DUE_AGE_SORT,
-  { id: "customers", label: "Customers", numeric: true },
-  { id: "last_sale", label: "Last sale", numeric: true },
-  { id: "name", label: "Salesperson" },
-  { id: "group", label: "Groups", numeric: true },
-  { id: "status", label: "Status" },
-];
+export function repSortOptions(bands, rows) {
+  return [
+    { id: "ytd_sales", label: "This year", numeric: true },
+    { id: "due", label: "Due", numeric: true },
+    ...dueAgeSort(bands, rows),
+    { id: "customers", label: "Customers", numeric: true },
+    { id: "last_sale", label: "Last sale", numeric: true },
+    { id: "name", label: "Salesperson" },
+    { id: "group", label: "Groups", numeric: true },
+    { id: "status", label: "Status" },
+  ];
+}
 
-export const MEMBER_SORT_OPTIONS = [
-  ...DUE_AGE_SORT,
-  { id: "last_sale", label: "Last sale", numeric: true },
-  { id: "party", label: "Customer" },
-  { id: "status", label: "Status" },
-];
+export function memberSortOptions(bands, rows) {
+  return [
+    { id: "due", label: "Due", numeric: true },
+    ...dueAgeSort(bands, rows),
+    { id: "last_sale", label: "Last sale", numeric: true },
+    { id: "party", label: "Customer" },
+    { id: "status", label: "Status" },
+  ];
+}
 
-const MEMBER_NUMERIC = ["due", "last_sale", ...AGE_KEYS];
+export const DUE_AGE_SORT = [{ id: "due", label: "Due", numeric: true }, ...dueAgeSort()];
+export const CUSTOMER_SORT_OPTIONS = customerSortOptions();
+export const GROUP_SORT_OPTIONS = groupSortOptions();
+export const REP_SORT_OPTIONS = repSortOptions();
+export const MEMBER_SORT_OPTIONS = memberSortOptions();
+
+const MEMBER_NUMERIC = ["due", "last_sale"];
 
 function memberStatusClass(status) {
   if (status === "urgent") return "err";
@@ -282,16 +297,20 @@ function memberStatusLabel(status) {
   return "On track";
 }
 
-export function MemberCustomersTable({ rows, extra }) {
+export function MemberCustomersTable({ rows, extra, bands }) {
   const [sort, setSort] = useState("due");
   const [dir, setDir] = useState("desc");
   const [page, setPage] = useState(1);
+  const ageBands = columnsFor(bands, rows);
+  const ageKeys = ageBands.map((band) => band.key);
+  const memberSort = memberSortOptions(bands, rows);
   const sortOptions = extra
-    ? [...MEMBER_SORT_OPTIONS.slice(0, -1), { id: extra.id, label: extra.label, numeric: extra.numeric }, MEMBER_SORT_OPTIONS[MEMBER_SORT_OPTIONS.length - 1]]
-    : MEMBER_SORT_OPTIONS;
+    ? [...memberSort.slice(0, -1), { id: extra.id, label: extra.label, numeric: extra.numeric }, memberSort[memberSort.length - 1]]
+    : memberSort;
 
   function onSort(id) {
-    const next = toggleSort(sort, dir, id, extra?.numeric ? MEMBER_NUMERIC.concat(extra.id) : MEMBER_NUMERIC);
+    const numeric = MEMBER_NUMERIC.concat(ageKeys, extra?.numeric ? [extra.id] : []);
+    const next = toggleSort(sort, dir, id, numeric);
     setSort(next.sort);
     setDir(next.dir);
     setPage(1);
@@ -299,7 +318,7 @@ export function MemberCustomersTable({ rows, extra }) {
 
   const ordered = (rows || []).slice().sort((a, b) => {
     const key = sort === "party" ? "name" : sort === "rep" ? "salesperson" : sort;
-    const moneyKey = ["due", ...AGE_KEYS].includes(key);
+    const moneyKey = ["due", ...ageKeys].includes(key);
     const av = moneyKey ? rowBucket(a, key) : String((key === extra?.id ? extra.get(a) : a[key]) || "").toLowerCase();
     const bv = moneyKey ? rowBucket(b, key) : String((key === extra?.id ? extra.get(b) : b[key]) || "").toLowerCase();
     if (av < bv) return dir === "asc" ? -1 : 1;
@@ -336,8 +355,8 @@ export function MemberCustomersTable({ rows, extra }) {
               <SortTh id="status" label="Status" sort={sort} dir={dir} onSort={onSort} />
               <SortTh id="last_sale" label="Last sale" sort={sort} dir={dir} onSort={onSort} />
               <SortTh id="due" label="Due" sort={sort} dir={dir} onSort={onSort} className="num" />
-              {AGE_KEYS.map((k) => (
-                <SortTh key={k} id={k} label={AGE_LABELS[k]} sort={sort} dir={dir} onSort={onSort} className="num" />
+              {ageBands.map((band) => (
+                <SortTh key={band.key} id={band.key} label={band.label} sort={sort} dir={dir} onSort={onSort} className="num" />
               ))}
             </tr>
           </thead>
@@ -362,8 +381,8 @@ export function MemberCustomersTable({ rows, extra }) {
                 <td><span className={"pill " + memberStatusClass(row.status)}>{row.status_label || memberStatusLabel(row.status)}</span></td>
                 <td className="quiet">{row.last_sale_label || "—"}</td>
                 <td className={"num amount" + (row.credit ? " credit" : "")}>{row.credit ? money(Math.abs(row.due)) : money(row.due)}</td>
-                {AGE_KEYS.map((k) => (
-                  <td key={k} className="num">{bucketMoney(rowBucket(row, k))}</td>
+                {ageBands.map((band) => (
+                  <td key={band.key} className="num">{bucketMoney(rowBucket(row, band.key))}</td>
                 ))}
               </tr>
             ))}
