@@ -21,6 +21,10 @@ export const REQUIRED_FIELDS = {
   item_cost: ["Item Name", "Cost", "Effective Date"],
   opening_cash: ["Date", "Amount"],
   payable: ["Account Name", "Amount", "Due Date"],
+  customer_opening: ["Date", "Account Name", "Balance"],
+  stock_opening: ["Date", "Item Name", "Qty", "Unit"],
+  purchases: ["Date", "Item Name", "Qty", "Unit"],
+  stock_movement: ["Date", "Item Name", "Qty", "Unit", "Movement"],
   party: ["Account Name", "Group"],
 };
 
@@ -99,6 +103,10 @@ export const TYPE_META = {
   item_cost: { label: "Item cost", partyLabel: "", dates: true, rep: false, group: false, item: true },
   opening_cash: { label: "Opening cash", partyLabel: "", dates: true, rep: false, group: false, item: false },
   payable: { label: "Payables", partyLabel: "Supplier", dates: true, rep: false, group: false, item: false },
+  customer_opening: { label: "Customer openings", partyLabel: "Customer", dates: true, rep: false, group: false, item: false, balance: true },
+  stock_opening: { label: "Stock openings", partyLabel: "", dates: true, rep: false, group: false, item: true },
+  purchases: { label: "Purchases", partyLabel: "Supplier", dates: true, rep: false, group: false, item: true },
+  stock_movement: { label: "Stock movements", partyLabel: "", dates: true, rep: false, group: false, item: true },
 };
 
 const LIBRARY_TABS = [

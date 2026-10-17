@@ -42,6 +42,10 @@ SOURCE_GRAINS = {
     "item_cost": {"entity": "product", "kind": "event", "grain": "item_cost"},
     "opening_cash": {"entity": "organization", "kind": "event", "grain": "opening_cash"},
     "payable": {"entity": "payment", "kind": "event", "grain": "payable"},
+    "customer_opening": {"entity": "customer", "kind": "snapshot", "grain": "customer_opening"},
+    "stock_opening": {"entity": "product", "kind": "snapshot", "grain": "stock_opening"},
+    "purchases": {"entity": "product", "kind": "event", "grain": "purchase_line"},
+    "stock_movement": {"entity": "product", "kind": "event", "grain": "stock_movement"},
 }
 
 EVENT_SOURCE_TYPES = tuple(k for k, v in SOURCE_GRAINS.items() if v["kind"] == "event")
@@ -66,6 +70,10 @@ CANONICAL_FIELDS = {
     "item_cost": ("Item Name", "Cost", "Effective Date"),
     "opening_cash": ("Date", "Amount"),
     "payable": ("Account Name", "Amount", "Due Date"),
+    "customer_opening": ("Date", "Account Name", "Balance"),
+    "stock_opening": ("Date", "Item Name", "Qty", "Unit"),
+    "purchases": ("Date", "Item Name", "Qty", "Unit"),
+    "stock_movement": ("Date", "Item Name", "Qty", "Unit", "Movement"),
 }
 
 METRIC_IDS = (

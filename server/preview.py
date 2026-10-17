@@ -52,6 +52,16 @@ SHEET_TYPE_ALIASES = {
     "payment": "payments",
     "party": "party",
     "parties": "party",
+    "customer opening": "customer_opening",
+    "opening customer": "customer_opening",
+    "opening receivable": "customer_opening",
+    "stock opening": "stock_opening",
+    "opening stock": "stock_opening",
+    "purchases": "purchases",
+    "purchase": "purchases",
+    "purchase register": "purchases",
+    "stock movement": "stock_movement",
+    "stock movements": "stock_movement",
 }
 
 HEADER_ALIASES = {
@@ -118,6 +128,27 @@ HEADER_ALIASES = {
     "sgst": "SGST",
     "cgst": "CGST",
     "igst": "IGST",
+    "unit": "Unit",
+    "uom": "Unit",
+    "location": "Location",
+    "lot": "Lot",
+    "batch": "Lot",
+    "supplier": "Supplier",
+    "movement": "Movement",
+    "line id": "Line ID",
+    "line no": "Line ID",
+    "receipt date": "Receipt Date",
+    "receipt status": "Receipt Status",
+    "movement key": "Movement Key",
+    "opening invoice date": "Invoice Date",
+    "kind": "Kind",
+    "currency": "Currency",
+    "complete": "Complete",
+    "complete through": "Complete Through",
+    "valuation": "Valuation",
+    "value": "Value",
+    "return of": "Return Of",
+    "signed qty": "Signed Qty",
 }
 
 
@@ -213,7 +244,7 @@ def _alias_dest(header, type_name):
         return "__skip__"
     if dest == "Amount" and type_name == "sales":
         return "Net Amount"
-    if dest == "Party Name" and type_name in ("receipt", "payments", "arr", "party"):
+    if dest == "Party Name" and type_name in ("receipt", "payments", "arr", "party", "customer_opening"):
         return "Account Name"
     if dest == "Account Name" and type_name in ("sales", "credit_note"):
         return "Party Name"
@@ -333,6 +364,13 @@ def sample_rows(headers, values, column_map, limit=20):
     return rows
 
 
+def _sheet_warnings(type_name, sample):
+    if type_name != "customer_opening":
+        return []
+    from vay.ledger import opening_preview_issues
+    return opening_preview_issues(sample)
+
+
 def preview_frames(store, frames, forced_type=None, overrides=None):
     overrides = overrides or {}
     sheets = []
@@ -405,5 +443,6 @@ def preview_frames(store, frames, forced_type=None, overrides=None):
             "event_mode": event_mode if type_name else "skip",
             "header_changes": drift,
             "sample": sample_rows(headers, values, column_map) if type_name and not skip else sample_rows(headers, values, {h: h for h in headers}),
+            "warnings": _sheet_warnings(type_name, sample_rows(headers, values, column_map) if type_name and not skip else []),
         })
     return {"sheets": sheets}

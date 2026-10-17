@@ -4,7 +4,7 @@ import { api } from "./api";
 import ReportProgress from "./ReportProgress";
 import { ITEM_ATTR_FIELDS, REQUIRED_FIELDS, TYPE_META } from "./theme";
 
-const IMPORT_TYPES = ["sales", "items", "arr", "receipt", "credit_note", "payments", "stock", "party", "reservation", "incoming", "item_cost", "opening_cash", "payable"];
+const IMPORT_TYPES = ["sales", "items", "arr", "receipt", "credit_note", "payments", "stock", "party", "reservation", "incoming", "item_cost", "opening_cash", "payable", "customer_opening", "stock_opening", "purchases", "stock_movement"];
 const SKIP_DEST = "__skip__";
 
 const STEPS = [

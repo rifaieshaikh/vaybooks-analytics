@@ -95,6 +95,21 @@ def _restrict_views(views, chosen, perms):
     return out
 
 
+def _opening_assessment(store, report_date):
+    """Freeze the opening and coverage reading used by this run."""
+    try:
+        from server.opening_check import assess_store
+        return assess_store(store, report_date)
+    except Exception as exc:
+        return {
+            "engine_version": "1",
+            "as_of": str(report_date),
+            "customers": [],
+            "items": [],
+            "error": str(exc),
+        }
+
+
 def enqueue_run(store, packs, report_date, reports=None, from_run="", perms=None):
     recover_stale_exports(store)
     active = store.active_run()
@@ -110,6 +125,7 @@ def enqueue_run(store, packs, report_date, reports=None, from_run="", perms=None
         "report_perms": list(perms) if perms is not None else None,
         "report_date": str(report_date),
         "message": "",
+        "opening_assessment": _opening_assessment(store, report_date),
     })
     return str(doc["_id"]), ""
 
@@ -208,7 +224,10 @@ class _LedgerStore:
 def _ledger_store(store, types):
     from server.customers import NOTE_TYPE
     names = set(types or [])
-    names.update(["sales", "receipt", "credit_note", "arr", "items", "stock", "customer", "party", "payments", NOTE_TYPE])
+    names.update([
+        "sales", "receipt", "credit_note", "arr", "items", "stock", "customer", "party", "payments",
+        NOTE_TYPE, "customer_opening", "stock_opening", "purchases", "stock_movement",
+    ])
     docs = {}
     for name in names:
         docs[name] = store.rows_of_type(name)
@@ -283,6 +302,26 @@ def _run_job(store, run_id):
             types = types_for_packs(packs)
             phases = phases_from_packs(packs)
             work = _ledger_store(store, types)
+            from server.ledger_surface import bridge_reports, freeze_opening_basis, quality_rows, source_version
+            try:
+                opening_assessment, opening_basis = freeze_opening_basis(work, dt)
+            except Exception as exc:
+                opening_assessment = {
+                    "engine_version": "1",
+                    "as_of": dt.strftime("%Y-%m-%d"),
+                    "customers": [],
+                    "items": [],
+                    "error": str(exc),
+                }
+                opening_basis = source_version(work)
+                opening_basis["as_of"] = dt.strftime("%Y-%m-%d")
+                opening_basis["error"] = str(exc)
+                work._opening_assessment = opening_assessment
+                work._opening_basis = opening_basis
+            store.update_run(run_id, {
+                "opening_assessment": opening_assessment,
+                "opening_basis": opening_basis,
+            })
 
             def on_progress(step_id, title, group, state, fraction=0, message=""):
                 nonlocal steps
@@ -418,6 +457,8 @@ def _run_job(store, run_id):
                         "eligibility": eligibility or None,
                     },
                 )
+                quality = phase2.setdefault("quality", {})
+                quality["rows"] = list(quality.get("rows") or []) + quality_rows(opening_assessment)
                 sheets = excel_reports(phase2)
                 wanted_ids = {row[0] for row in phase2_wanted}
                 if chosen or report_perms is not None:
@@ -435,6 +476,7 @@ def _run_job(store, run_id):
                 on_progress("analytics", "Scorecard, sales change, and data checks", "Checks", "failed", message=str(exc))
                 for step_id, title, group in phase2_wanted:
                     on_progress(step_id, title, group, "failed", message=str(exc))
+            result.setdefault("reports", []).extend(bridge_reports(opening_assessment))
             if report_perms is not None:
                 from server.auth import report_allowed
                 result["reports"] = [
@@ -556,6 +598,7 @@ def _run_job(store, run_id):
                 },
                 "eligibility": eligibility,
                 "reconciliation": recon_result,
+                "opening_basis": opening_basis,
             }
 
             failed_steps = [row for row in steps if row.get("state") == "failed"]

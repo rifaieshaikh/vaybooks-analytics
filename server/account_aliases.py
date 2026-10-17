@@ -12,7 +12,7 @@ from server.settings import EVENT_TYPES
 
 ALIAS_UK = "account_aliases"
 
-_EVENT_TYPES = ("sales", "receipt", "items", "payments")
+_EVENT_TYPES = ("sales", "receipt", "items", "payments", "customer_opening")
 _NAME_KEYS = {
     "sales": ("Party Name", "Account Name"),
     "items": ("Party Name", "Account Name"),
@@ -21,6 +21,7 @@ _NAME_KEYS = {
     "arr": ("Account Name", "Party Name"),
     "party": ("Account Name", "Party Name"),
     "customer": ("Account Name", "Party Name"),
+    "customer_opening": ("Account Name", "Party Name"),
 }
 _FILL_KEYS = ("Group", "Party Type", "Premium", "Blacklisted")
 

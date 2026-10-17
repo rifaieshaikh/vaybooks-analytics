@@ -1234,4 +1234,5 @@ def get_item(store, uk):
     from server.item_attrs import public_attrs
     detail.update(public_attrs(store, uk))
     from server.repurchase import attach_repurchase
-    return attach_repurchase(store, detail, item=detail.get("uk") or uk)
+    from server.ledger_surface import stamp_item
+    return stamp_item(attach_repurchase(store, detail, item=detail.get("uk") or uk), store)

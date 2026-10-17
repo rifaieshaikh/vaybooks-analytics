@@ -668,4 +668,7 @@ def get_item_dim(store, dimension, uk):
     detail["dimension_label"] = built["label"]
     detail["hash"] = built["hash"]
     from server.repurchase import attach_repurchase
-    return attach_repurchase(store, detail, **{built["dimension"]: detail.get("uk") or ""})
+    from server.ledger_surface import stamp_supplier
+    from server.book import load_book
+    stamped = attach_repurchase(store, detail, **{built["dimension"]: detail.get("uk") or ""})
+    return stamp_supplier(stamped, store, (load_book(store) or {}).get("as_of"))

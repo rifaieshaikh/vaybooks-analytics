@@ -213,6 +213,9 @@ def build_views_snapshot(store, on_progress=None, include_repurchase=True, only=
         if detail:
             item_details[uk] = detail
         tick("360-items", "Items 360", index, item_total)
+    from server.ledger_surface import stamp_item
+    for card in item_cards or []:
+        stamp_item(card, store, book.get("as_of"))
     buy_cards = [c for c in item_cards if c.get("status") in ("low", "soon") and (c.get("buy_qty") or 0) > 0]
     items_payload = {
         "items": item_cards,
@@ -284,6 +287,11 @@ def build_views_snapshot(store, on_progress=None, include_repurchase=True, only=
                 dim_cards, dim_attrs, key, spec, dim_rolls, keep_members=False,
             )
             _pack_dimension(key, built)
+
+    from server.ledger_surface import stamp_supplier
+    supplier_pack = item_dims.get("supplier") or {}
+    for detail in (supplier_pack.get("details") or {}).values():
+        stamp_supplier(detail, store, book.get("as_of"))
 
     if include_repurchase:
         from server.repurchase import ensure_repurchase, stamp_saved_details
@@ -778,6 +786,7 @@ def customer_profile(detail):
         "buying": True,
         "activity": True,
         "ar-mismatch": True,
+        "ledger": bool(out.get("ledger_bridge")),
     }
     return out
 

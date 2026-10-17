@@ -15,16 +15,21 @@ SESSION_COOKIE = "vay_session"
 SOURCE_TYPES = (
     "sales", "receipt", "credit_note", "arr", "items", "stock", "payments", "party", "customer",
     "reservation", "incoming", "item_cost", "opening_cash", "payable",
+    "customer_opening", "stock_opening", "purchases", "stock_movement",
 )
 EVENT_TYPES = (
     "sales", "receipt", "credit_note", "items", "payments",
     "reservation", "incoming", "item_cost", "opening_cash", "payable",
+    "purchases", "stock_movement",
 )
-SNAPSHOT_TYPES = ("arr", "stock", "party", "customer")
-DATE_FIELDS = {"Date", "Need By", "Expected Date", "Due Date", "Effective Date", "Cost Date"}
+SNAPSHOT_TYPES = ("arr", "stock", "party", "customer", "customer_opening", "stock_opening")
+DATE_FIELDS = {
+    "Date", "Need By", "Expected Date", "Due Date", "Effective Date", "Cost Date",
+    "Invoice Date", "Receipt Date", "Complete Through",
+}
 AMOUNT_FIELDS = {
     "Net Amount", "Amount", "Sales Amount", "SGST", "CGST", "IGST",
-    "Qty", "Balance", "Days", "P.Price", "Rate", "Cost",
+    "Qty", "Balance", "Days", "P.Price", "Rate", "Cost", "Value", "Signed Qty",
 }
 NAME_FIELDS = ("Party Name", "Account Name", "Item Name")
 UK_SEP = "\x1f"
@@ -63,6 +68,10 @@ REQUIRED_FIELDS = {
     "item_cost": ["Item Name", "Cost", "Effective Date"],
     "opening_cash": ["Date", "Amount"],
     "payable": ["Account Name", "Amount", "Due Date"],
+    "customer_opening": ["Date", "Account Name", "Balance"],
+    "stock_opening": ["Date", "Item Name", "Qty", "Unit"],
+    "purchases": ["Date", "Item Name", "Qty", "Unit"],
+    "stock_movement": ["Date", "Item Name", "Qty", "Unit", "Movement"],
 }
 
 # Stock columns. Empty is allowed, so they are not required and a file without them still imports.
@@ -84,6 +93,10 @@ DEFAULT_UNIQUE_KEYS = {
     "item_cost": ["Item Name", "Effective Date"],
     "opening_cash": ["Date"],
     "payable": ["Account Name", "Due Date", "Amount"],
+    "customer_opening": ["Date", "Account Name", "Kind", "Invoice No", "Balance"],
+    "stock_opening": ["Date", "Item Name", "Location", "Lot", "Unit"],
+    "purchases": ["Date", "Invoice No", "Line ID", "SlNo", "Item Name", "Qty"],
+    "stock_movement": ["Date", "Item Name", "Movement", "Location", "Lot", "Qty"],
 }
 
 TYPE_LABELS = {
@@ -101,9 +114,16 @@ TYPE_LABELS = {
     "item_cost": "Item cost",
     "opening_cash": "Opening cash",
     "payable": "Payables",
+    "customer_opening": "Customer openings",
+    "stock_opening": "Stock openings",
+    "purchases": "Purchases",
+    "stock_movement": "Stock movements",
 }
 
-CLEANUP_TYPES = ("arr", "sales", "items", "payments", "receipt", "credit_note", "stock")
+CLEANUP_TYPES = (
+    "arr", "sales", "items", "payments", "receipt", "credit_note", "stock",
+    "customer_opening", "stock_opening", "purchases", "stock_movement",
+)
 
 
 def mongo_uri():

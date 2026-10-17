@@ -2558,6 +2558,8 @@ def summarize_customer(store, doc, as_of=None):
     }
     base.update(policy_meta_for_customer(store, base))
     _stamp_settlement_party(base.get("settlements"), base.get("name"), base.get("uk"))
+    from server.ledger_surface import stamp_customer
+    stamp_customer(base, store)
     return base
 
 
