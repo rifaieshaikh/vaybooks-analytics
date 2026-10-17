@@ -9,9 +9,9 @@ from vay.engine import planned_report_steps
 
 from server.auth import assert_perm, filter_report_ids, filter_snapshot, require_user
 from server.jobs import enqueue_export, enqueue_run, export_payload, run_export_job, run_job, snapshot_reports
-from server.pdf_export import pdf_filename, visible_reports, zip_keep_names
+from server.pdf_export import pdf_filename, reports_named_in_zip, visible_reports, zip_keep_names
 from server.route_helpers import filtered_run_xlsx, run_summary, start_export_job, start_job
-from server.schemas import ExportPdfBody, RunBody
+from server.schemas import ExportPdfBody, LedgerLinkBody, RunBody
 from server.settings import sync_jobs
 from server.store import get_store
 
@@ -206,7 +206,9 @@ def get_run_export_file(run_id: str, user=Depends(require_user)):
     try:
         reports = snapshot_reports(store, doc)
     except (TypeError, ValueError, AttributeError, json.JSONDecodeError):
-        raise HTTPException(403, "No reports you can download in this run")
+        reports = []
+    if not reports:
+        reports = reports_named_in_zip(data)
     if not reports:
         raise HTTPException(403, "No reports you can download in this run")
     visible = visible_reports(reports, user["permissions"])
@@ -222,3 +224,41 @@ def get_run_export_file(run_id: str, user=Depends(require_user)):
         media_type="application/zip",
         headers={"Content-Disposition": "attachment; filename=%s" % (blob.get("filename") or "vay_reports.zip")},
     )
+
+
+@router.get("/api/ledger/exceptions")
+def api_ledger_exceptions(as_of: str = "", user=Depends(require_user)):
+    assert_perm(user, "reports.create")
+    from server.ledger_apply import list_exceptions
+    when = as_of or ""
+    if not when:
+        from vay.dates import today_ist
+        when = today_ist().strftime("%Y-%m-%d")
+    return list_exceptions(get_store(), when)
+
+
+@router.post("/api/ledger/rollback")
+def api_ledger_rollback(user=Depends(require_user)):
+    assert_perm(user, "reports.create")
+    from server.ledger_apply import rollback_ledger
+    return rollback_ledger(get_store())
+
+
+@router.post("/api/ledger/links")
+def api_save_ledger_link(body: LedgerLinkBody, user=Depends(require_user)):
+    assert_perm(user, "reports.create")
+    from server.ledger_persist import save_confirmed_link
+    try:
+        return save_confirmed_link(get_store(), body.model_dump(), user.get("username") or "")
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.post("/api/ledger/links/{link_id}/void")
+def api_void_ledger_link(link_id: str, user=Depends(require_user)):
+    assert_perm(user, "reports.create")
+    from server.ledger_persist import void_confirmed_link
+    try:
+        return void_confirmed_link(get_store(), link_id, user.get("username") or "")
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))

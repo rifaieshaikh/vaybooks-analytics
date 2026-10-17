@@ -232,6 +232,7 @@ def default_org_policy():
         },
         "payment_categories": None,
         "targets": {},
+        "ledger_engine": "1",
     }
 
 

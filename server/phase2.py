@@ -321,12 +321,25 @@ def build_bundle(store, report_date, exceptions=None, review_count=0, prepared=N
         ),
         "sales_change": sales_change(_customer_periods(accounts, report_date), _product_periods(tables, report_date)),
         "customer_movement": customer_movement(accounts, report_date, ids),
-        "collection": _gate_collection(collection_worklist(accounts), eligibility),
+        "collection": _ledger_collection(store, report_date, _gate_collection(collection_worklist(accounts), eligibility)),
         "stock": _attach_buy(_gate_stock(stock, eligibility), store),
         "quality": quality_fixes(exceptions, eligibility, review_count),
         "eligibility": eligibility,
     }
     return bundle
+
+
+def _ledger_collection(store, report_date, worklist):
+    from server.ledger_apply import collection_rows, ledger_enabled
+    if not ledger_enabled(store):
+        return worklist
+    rows = collection_rows(store, report_date)
+    if rows is None:
+        return worklist
+    worklist = dict(worklist or {})
+    worklist["rows"] = rows
+    worklist["source"] = "ledger"
+    return worklist
 
 
 def _gate_collection(worklist, eligibility):

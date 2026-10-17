@@ -145,6 +145,7 @@ def get_org_policy(store):
         "retail_pack": _flag(fields.get("RetailPack") if fields.get("RetailPack") not in ("", None) else fields.get("retail_pack")),
         "custom_columns": _parse_columns(fields.get("CustomColumns") or fields.get("custom_columns")),
         "entitlements": _parse_json(fields.get("Entitlements") or fields.get("entitlements"), {}),
+        "ledger_engine": str(fields.get("LedgerEngine") or fields.get("ledger_engine") or defaults["ledger_engine"]),
     }
 
 
@@ -207,6 +208,10 @@ def save_org_policy(store, body):
     else:
         company_name = str(body.get("company_name") or "").strip()
     expense_pack = (body.get("expense_pack") or current["expense_pack"] or DEFAULT_EXPENSE_PACK).strip() or DEFAULT_EXPENSE_PACK
+    if "ledger_engine" in body:
+        ledger_engine = str(body.get("ledger_engine") or "")
+    else:
+        ledger_engine = str(current.get("ledger_engine") or "1")
     fields = {
         "FiscalYearStartMonth": str(fy),
         "Timezone": timezone,
@@ -225,6 +230,7 @@ def save_org_policy(store, body):
         "RetailPack": "1" if retail_pack else "0",
         "CustomColumns": json.dumps(custom_columns),
         "Entitlements": json.dumps(entitlements if isinstance(entitlements, dict) else {}),
+        "LedgerEngine": ledger_engine,
     }
     store.upsert_row({
         "type": SETTING_TYPE,

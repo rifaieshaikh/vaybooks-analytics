@@ -35,10 +35,25 @@ def assess_store(store, as_of):
         currency=policy.get("currency_code") or "INR",
         terms_days=get_default_due_days(store),
         aliases=alias_lookup(store),
+        confirmed_links=_load_confirmed_links(store),
     )
 
 
-def assess_rows(rows, *, as_of, organization_id, currency, terms_days, aliases=None):
+def _load_confirmed_links(store):
+    found = []
+    try:
+        rows = store.rows_of_type("ledger_link") or []
+    except Exception:
+        return found
+    for row in rows:
+        fields = dict((row.get("fields") or {}))
+        if fields.get("voided_at") or fields.get("evidence") != "manually_confirmed":
+            continue
+        found.append(fields)
+    return found
+
+
+def assess_rows(rows, *, as_of, organization_id, currency, terms_days, aliases=None, confirmed_links=None):
     aliases = aliases or {}
     customers = {}
     items = {}
@@ -55,7 +70,26 @@ def assess_rows(rows, *, as_of, organization_id, currency, terms_days, aliases=N
             bucket["checkpoint_net"] = None
             bucket["movements_complete"] = False
         payload.append(bucket)
+    _attach_confirmed_links(payload, confirmed_links, currency)
     return assess_books(payload, list(items.values()), as_of=as_of)
+
+
+def _attach_confirmed_links(customers, links, currency):
+    by_key = {(row.get("customer_id"), row.get("currency")): row for row in customers}
+    for link in links or []:
+        if link.get("voided_at") or link.get("evidence") != "manually_confirmed":
+            continue
+        name = str(link.get("customer_id") or "").strip().lower()
+        link_currency = str(link.get("currency") or currency or "").strip().upper()
+        bucket = by_key.get((name, link_currency))
+        if bucket is None:
+            continue
+        bucket["links"].append({
+            "credit_id": link.get("credit_id") or "",
+            "debit_id": link.get("debit_id") or "",
+            "amount": link.get("amount"),
+            "evidence": "manually_confirmed",
+        })
 
 
 def _customer(customers, name, organization_id, currency):

@@ -37,15 +37,36 @@ def source_version(store):
     }
 
 
+def _link_token(store):
+    parts = []
+    try:
+        rows = store.rows_of_type("ledger_link") or []
+    except Exception:
+        return ""
+    for row in rows:
+        fields = row.get("fields") or {}
+        parts.append("%s|%s|%s|%s|%s" % (
+            row.get("uk") or "",
+            fields.get("credit_id") or "",
+            fields.get("debit_id") or "",
+            fields.get("amount") if fields.get("amount") is not None else "",
+            fields.get("voided_at") or "",
+        ))
+    parts.sort()
+    return hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()
+
+
 def current_assessment(store, as_of):
-    """Return the assessment for these exact rows. A changed import builds a new one."""
+    """Return the assessment for these exact rows. A changed import or confirmed link builds a new one."""
     version = source_version(store)
+    version["link_token"] = _link_token(store)
     cached = getattr(store, "_opening_assessment", None)
     cached_version = getattr(store, "_opening_basis", None) or {}
     as_of_text = str(as_of)[:10]
     if (
         cached
         and cached_version.get("digest") == version["digest"]
+        and cached_version.get("link_token") == version["link_token"]
         and str(cached.get("as_of") or "")[:10] == as_of_text
     ):
         return cached, cached_version
@@ -154,16 +175,20 @@ def stamp_customer(detail, store):
     return detail
 
 
-def stamp_item(detail, store):
+def stamp_item(detail, store, as_of=None):
     if not isinstance(detail, dict) or not store:
         return detail
-    as_of = detail.get("as_of") or ""
+    as_of = as_of or detail.get("as_of") or ""
     if not as_of:
         return detail
     assessment, _version = current_assessment(store, as_of)
     view = item_bridge_view(assessment, detail.get("name"))
     if view:
         detail["stock_bridge"] = view
+        detail["stock_change_withheld"] = any(
+            row.get("opening_status") == "unresolved" or "stock_change" in (row.get("withheld_outputs") or [])
+            for row in (view.get("bridges") or [])
+        )
     return detail
 
 

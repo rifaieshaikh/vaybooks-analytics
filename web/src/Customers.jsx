@@ -509,6 +509,52 @@ function ActivityTable({ rows, shown, canSales, onOpenInvoice }) {
   );
 }
 
+function readableId(value) {
+  const parts = String(value || "").split("\u001f").map((part) => part.trim()).filter(Boolean);
+  return parts.length ? parts.join(" · ") : "—";
+}
+
+function LedgerPanel({ detail }) {
+  const links = detail.ledger_links || [];
+  const unused = detail.unused_credits || [];
+  const exceptions = detail.ledger_exceptions || [];
+  return (
+    <div className="card">
+      <h3>Receipt links</h3>
+      {detail.balance_exact === false ? <p className="muted">The opening is unknown, so this is not a complete balance.</p> : null}
+      {links.length ? (
+        <table>
+          <thead><tr><th>Credit</th><th>Invoice</th><th>Evidence</th><th className="num">Amount</th></tr></thead>
+          <tbody>
+            {links.map((row) => (
+              <tr key={(row.credit_id || "") + (row.debit_id || "")}>
+                <td>{readableId(row.credit_id)}</td>
+                <td>{row.invoice || row.debit_id || "—"}</td>
+                <td>{row.evidence || "—"}{row.cash ? "" : " · not cash"}</td>
+                <td className="num">{money(row.amount)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : <p className="muted">No receipt has been applied.</p>}
+      <h3>Unused credit</h3>
+      {unused.length ? (
+        <ul>
+          {unused.map((row) => (
+            <li key={row.source_id}>{readableId(row.source_id)} · {money(row.remaining)}{row.cash ? " · cash" : " · not cash"}</li>
+          ))}
+        </ul>
+      ) : <p className="muted">No unused credit.</p>}
+      {exceptions.length ? (
+        <>
+          <h3>Exceptions</h3>
+          <ul>{exceptions.map((row, index) => <li key={row.code + index}>{row.message || row.code}</li>)}</ul>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
 const BUYING_PERIODS = ["this_month", "last_month", "last_3m", "this_year", "last_year", "all"];
 const BUYING_CHIPS = [...BUYING_PERIODS, "suggest"];
 
@@ -517,7 +563,7 @@ function firstBuyingPeriod(periods, fallback) {
   return BUYING_PERIODS.find((id) => ((periods[id] || {}).items || []).length) || "all";
 }
 
-const CUSTOMER_TABS = ["due", "settlements", "ar-mismatch", "sales", "quantity", "years", "buying", "repurchase", "ordering", "order-check", "activity", "follow-up"];
+const CUSTOMER_TABS = ["due", "settlements", "ledger", "ar-mismatch", "sales", "quantity", "years", "buying", "repurchase", "ordering", "order-check", "activity", "follow-up"];
 
 function customerTabGroups(detail) {
   const open = Number(detail.invoices_waiting) || 0;
@@ -525,6 +571,7 @@ function customerTabGroups(detail) {
     { tabs: [
       { id: "due", label: "Due", count: open > 0 ? open : null },
       { id: "settlements", label: "Settlements" },
+      { id: "ledger", label: "Ledger" },
       { id: "ar-mismatch", label: "AR mismatch" },
     ] },
     { tabs: [
@@ -702,7 +749,8 @@ function Profile({ detail, runId, canSales, canStock, canEditDueDays, canManage,
         </div>
         <div className="hero-due">
           <span className="muted">{detail.credit ? "Advance" : "Amount due"}</span>
-          <div className="hero-num">{money(detail.credit ? Math.abs(detail.due) : detail.due)}</div>
+          <div className="hero-num">{detail.balance_exact === false && detail.due == null ? "Unknown" : money(detail.credit ? Math.abs(detail.due) : detail.due)}</div>
+          {detail.balance_exact === false ? <p className="muted">Opening is unknown. This is the known open amount, not a complete balance.</p> : null}
           {detail.ar_explanation ? <ExplainFigure explanation={detail.ar_explanation} label="Explain amount due" /> : null}
           {detail.balance_issue || detail.ledger_opening ? (
             <p className="muted">
@@ -766,6 +814,7 @@ function Profile({ detail, runId, canSales, canStock, canEditDueDays, canManage,
       {tab === "settlements" ? (
         sectionPending ? <EmptyCard title="Loading settlements" copy="Reading receipts applied to invoices." /> : <SettlementsPanel detail={view} />
       ) : null}
+      {tab === "ledger" ? <LedgerPanel detail={view} /> : null}
       {tab === "sales" ? (
         <>
           {sectionPending ? <EmptyCard title="Loading sales" copy="Reading the saved order gaps." /> : <SalesGapsPanel detail={view} />}

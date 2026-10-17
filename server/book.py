@@ -125,7 +125,7 @@ def build_book(store):
     for row in list(arr) + list(parties) + list(customers):
         fields = row.get("fields") or {}
         name = clean_text(fields.get("Account Name") or fields.get("Party Name")).lower()
-        group = clean_text(fields.get("Group"))
+        group = real_group(fields.get("Group"))
         if name and group:
             group_map[name] = group
 

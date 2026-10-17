@@ -330,7 +330,8 @@ def _item_lines_from_rows(item_rows, sales_rows, groups, start_month=None):
                 if not line["rep"] and sale.get("rep"):
                     line["rep"] = sale["rep"]
             if not line["group"] and line["party"]:
-                line["group"] = groups.get(line["party"].lower()) or ""
+                from vay.row_defaults import real_group
+                line["group"] = real_group((groups or {}).get(line["party"].lower()))
         lines.sort(key=lambda x: x["date"] or parse_date("1900-01-01"), reverse=True)
     return by_uk
 

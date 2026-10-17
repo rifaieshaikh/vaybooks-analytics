@@ -645,6 +645,8 @@ function Profile({ detail, runId, onBack, backLabel, canEdit, onSaved }) {
           <strong>{detail.position == null ? "Not in this file" : qty(detail.position)}</strong>
         </div>
       </div>
+      {detail.stock_change_withheld ? <p className="muted">Stock opening was not imported, so the change from opening to the count stays unknown. The reorder quantity uses the current stock file.</p> : null}
+      {detail.stock_bridge && detail.stock_bridge.cost_history && detail.stock_bridge.cost_history.length ? <p className="muted">Received purchases keep their own cost. The stock price on the item is unchanged.</p> : null}
       {detail.demand_label ? <p className="muted">{detail.demand_label}{detail.demand_target != null ? " · Target " + qty(detail.demand_target) : ""}</p> : null}
       {detail.past_check ? (
         <p className="muted">

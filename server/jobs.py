@@ -226,7 +226,7 @@ def _ledger_store(store, types):
     names = set(types or [])
     names.update([
         "sales", "receipt", "credit_note", "arr", "items", "stock", "customer", "party", "payments",
-        NOTE_TYPE, "customer_opening", "stock_opening", "purchases", "stock_movement",
+        NOTE_TYPE, "customer_opening", "stock_opening", "purchases", "stock_movement", "ledger_link",
     ])
     docs = {}
     for name in names:
@@ -322,6 +322,13 @@ def _run_job(store, run_id):
                 "opening_assessment": opening_assessment,
                 "opening_basis": opening_basis,
             })
+            ledger_publication = {}
+            try:
+                from server.ledger_persist import publish_ledger
+                ledger_publication = publish_ledger(work, dt)
+            except Exception as exc:
+                ledger_publication = {"error": str(exc)}
+            store.update_run(run_id, {"ledger_publication": ledger_publication})
 
             def on_progress(step_id, title, group, state, fraction=0, message=""):
                 nonlocal steps
@@ -411,6 +418,27 @@ def _run_job(store, run_id):
             finally:
                 store._force_as_of = None
                 store._360_book = None
+
+            shadow_comparison = {"compared": 0, "matches": 0, "material": [], "legacy_is_oracle": False}
+            try:
+                from server.ledger_persist import shadow_report
+                legacy_customers = []
+                if isinstance(views, dict):
+                    for detail in (views.get("customers") or {}).values():
+                        if isinstance(detail, dict):
+                            legacy_customers.append({
+                                "name": detail.get("name") or "",
+                                "due": detail.get("due"),
+                            })
+                shadow_comparison = shadow_report(opening_assessment, legacy_customers)
+            except Exception as exc:
+                shadow_comparison = {
+                    "compared": 0,
+                    "matches": 0,
+                    "material": [],
+                    "legacy_is_oracle": False,
+                    "error": str(exc),
+                }
 
             report_date_s = dt.strftime("%Y-%m-%d")
             recon_result = {"status": "unavailable", "message": "", "exceptions": []}
@@ -599,6 +627,13 @@ def _run_job(store, run_id):
                 "eligibility": eligibility,
                 "reconciliation": recon_result,
                 "opening_basis": opening_basis,
+                "ledger_publication": ledger_publication,
+                "shadow_comparison": {
+                    "compared": shadow_comparison.get("compared"),
+                    "matches": shadow_comparison.get("matches"),
+                    "material_count": shadow_comparison.get("material_count"),
+                    "legacy_is_oracle": False,
+                },
             }
 
             failed_steps = [row for row in steps if row.get("state") == "failed"]
@@ -632,6 +667,8 @@ def _run_job(store, run_id):
                 "report_count": len(snapshot.get("reports") or []),
                 "pdf_catalog": catalog_entries(snapshot.get("reports") or []),
                 "manifest": manifest,
+                "ledger_publication": ledger_publication,
+                "shadow_comparison": shadow_comparison,
                 "generate_progress": {
                     "current": "",
                     "done": sum(1 for row in steps if row.get("state") in ("done", "failed")),

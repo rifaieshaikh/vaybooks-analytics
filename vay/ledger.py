@@ -775,12 +775,15 @@ def settle(
     for row in allocations:
         if row.amount <= 0:
             continue
+        debit = by_debit.get(row.debit_id)
         alloc_out.append({
             "credit_id": row.credit_id,
             "debit_id": row.debit_id,
             "amount": row.amount,
             "evidence": row.evidence,
             "effective_date": row.effective_date,
+            "invoice_date": debit.invoice_date if debit else None,
+            "invoice_number": debit.invoice_number if debit else "",
             "cash": row.cash,
             "credit_kind": row.credit_kind,
             "referenced": bool(getattr(row, "referenced", False) or (by_credit[row.credit_id].reference if row.credit_id in by_credit else False)),

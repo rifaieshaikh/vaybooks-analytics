@@ -48,6 +48,20 @@ def zip_without_profit(data):
     return out.getvalue()
 
 
+def reports_named_in_zip(data):
+    """Report ids taken from PDF names when a run has no saved snapshot."""
+    found = []
+    try:
+        with ZipFile(BytesIO(data), "r") as src:
+            for info in src.infolist():
+                name = str(info.filename or "")
+                if name.lower().endswith(".pdf"):
+                    found.append({"id": name[:-4]})
+    except Exception:
+        return []
+    return found
+
+
 def zip_keep_names(data, keep):
     keep = set(keep or [])
     out = BytesIO()

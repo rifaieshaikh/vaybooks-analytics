@@ -26,6 +26,15 @@ class RunBody(BaseModel):
     from_run: str = ""
 
 
+class LedgerLinkBody(BaseModel):
+    customer_id: str = ""
+    credit_id: str = ""
+    debit_id: str = ""
+    amount: str = ""
+    currency: str = ""
+    evidence: str = "manually_confirmed"
+
+
 class ExportPdfBody(BaseModel):
     ids: list[str] = Field(default_factory=list)
 

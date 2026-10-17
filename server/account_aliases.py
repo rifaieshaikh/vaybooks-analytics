@@ -282,10 +282,13 @@ def migrate_account(store, source, destination):
     if not any(pair["source"].lower() == source_key for pair in pairs):
         pairs.append({"source": src, "destination": dst})
     saved = _save_pairs(store, pairs)
+    from server.ledger_persist import rewrite_links_for_merge
+    links_moved = rewrite_links_for_merge(store, src, dst)
     saved.update({
         "source": src,
         "destination": dst,
         "rows_moved": moved,
         "rows_dropped": dropped,
+        "ledger_links_moved": links_moved,
     })
     return saved

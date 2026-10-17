@@ -310,7 +310,7 @@ def build_views_snapshot(store, on_progress=None, include_repurchase=True, only=
             "attention": directory.get("attention") or [],
             "options": directory.get("options") or {},
         },
-        "customers": customers,
+        "customers": _mark_snapshot_customers(customers, store),
         "groups": groups_payload.get("groups") or [],
         "group_details": group_details,
         "group_options": groups_payload.get("options") or {},
@@ -762,6 +762,19 @@ def _avg_gap_days(buying):
     return 0
 
 
+def _mark_snapshot_customers(customers, store):
+    """A saved run keeps this result. A later rebuild writes a new run."""
+    from server.ledger_persist import publication
+    current = publication(store) if store is not None else {}
+    for detail in (customers or {}).values():
+        if not isinstance(detail, dict):
+            continue
+        detail["result_scope"] = "snapshot"
+        if current.get("calculation_key"):
+            detail["ledger_calculation_key"] = current.get("calculation_key")
+    return customers
+
+
 def customer_profile(detail):
     """Header, due list, and the small figures other tabs need to know they exist."""
     if not detail:
@@ -905,8 +918,9 @@ def customer_section(detail, section):
 
 _CUSTOMER_LIST_FIELDS = (
     "uk", "name", "group", "salesperson", "status", "status_label",
-    "last_sale", "last_sale_label", "due", "credit",
-    "balance_diff", "balance_issue", "ordered_overdue", "premium", "blacklisted",
+    "last_sale", "last_sale_label", "due", "credit", "balance_exact", "opening_status",
+    "balance_diff", "balance_issue", "ledger_gap", "ledger_opening", "arr_balance",
+    "ordered_overdue", "premium", "blacklisted",
 )
 
 

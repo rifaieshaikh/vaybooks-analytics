@@ -2560,6 +2560,27 @@ def summarize_customer(store, doc, as_of=None):
     _stamp_settlement_party(base.get("settlements"), base.get("name"), base.get("uk"))
     from server.ledger_surface import stamp_customer
     stamp_customer(base, store)
+    from server.ledger_apply import apply_ledger_customer, ledger_enabled
+    apply_ledger_customer(store, base)
+    if ledger_enabled(store) and base.get("ledger_engine"):
+        ordering = ordering_for_party(
+            store,
+            name_l,
+            as_of,
+            party_name=name,
+            customer_uk=base.get("uk") or account_uk(name),
+            group=clean_text(fields.get("Group")),
+            rep=act["salesperson"],
+            book=book,
+            mode=mode,
+            bands=bands,
+            overrides=overrides,
+            default_due=default_due,
+            arr_due=base.get("due"),
+        )
+        base["ordering"] = ordering
+        base["ordered_overdue"] = bool((ordering.get("badge") or {}).get("current_month") or (ordering.get("badge") or {}).get("current_fy"))
+        base["ar_mismatch"] = ar_mismatch_for_party(store, name_l, base.get("due"), as_of, book=book)
     return base
 
 
@@ -2568,6 +2589,7 @@ _STATUS_LABELS = {
     "followup": "Follow up",
     "credit": "Advance",
     "ontrack": "On track",
+    "unknown": "Unknown",
 }
 _STATUS_IDS = {
     "urgent": "urgent",
@@ -2640,6 +2662,15 @@ def customer_directory_rows(store):
     default_due = get_default_due_days(store)
     receipts_by_party = book.get("receipts_by_party") or {}
     sm = _fy_month(store, book)
+    from server.ledger_apply import assessment_for, ledger_enabled, project_customer
+    ledger_customers = {}
+    use_ledger = ledger_enabled(store)
+    if use_ledger:
+        ledger_assessment, _version = assessment_for(store, as_of)
+        ledger_customers = {
+            str(row.get("customer_id") or ""): row
+            for row in (ledger_assessment.get("customers") or [])
+        }
     rows = []
     for doc in book["customers"]:
         fields = (doc or {}).get("fields") or {}
@@ -2685,7 +2716,19 @@ def customer_directory_rows(store):
             invoices, receipt_rows, as_of, opening_dt=opening_dt, mode=mode, due=due, bands=bands,
             credits=credit_rows,
         )
+        balance_exact = True
+        opening_status = ""
         status = _status_from_open(due, open_lines)
+        if use_ledger and name_l in ledger_customers:
+            projected = project_customer(ledger_customers[name_l], as_of, bands, sm)
+            if projected:
+                due = projected["due"]
+                buckets = projected["owe_buckets"]
+                collection_buckets = projected["collection_buckets"]
+                open_lines = projected["open_invoices"]
+                balance_exact = projected["balance_exact"]
+                opening_status = projected["opening_status"]
+                status = projected["status"]
         flat_owe = flatten_owe(buckets)
         flat_col = flatten_collection(collection_buckets)
         cust_uk = (doc or {}).get("uk") or account_uk(name)
@@ -2725,7 +2768,10 @@ def customer_directory_rows(store):
             "rep": salesperson,
             "last_sale": _iso(sale_d),
             "last_sale_label": last_label.get(name_l) or "",
-            "credit": due < 0,
+            "credit": due is not None and due < 0,
+            "balance_exact": balance_exact,
+            "opening_status": opening_status,
+            "ledger_engine": "1" if use_ledger else "",
             "due_days": ordering.get("due_days"),
             "due_days_source": ordering.get("due_days_source"),
             "ordering_badge": badge,

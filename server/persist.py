@@ -364,4 +364,6 @@ def persist_type(
         counts.update(sync_item_attrs(
             store, type_name, prepared, mapper.get("column_map") or {}, headers, upload_id,
         ))
+    from server.ledger_persist import invalidate_ledger
+    invalidate_ledger(store)
     return counts

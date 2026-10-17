@@ -11,7 +11,11 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from vay.dates import clean_text
 from vay.settlement import empty_buckets
 
-_SHARED_TYPES = ("activity_kind", "activity_assignee", "app_setting", "due_days", "order_check")
+_SHARED_TYPES = (
+    "activity_kind", "activity_assignee", "app_setting", "due_days", "order_check",
+    "sales", "receipt", "credit_note", "arr", "customer_opening",
+    "stock_opening", "purchases", "stock_movement", "ledger_link",
+)
 _CUSTOMER_CUTOFF = 40
 _RAM_RESERVE = int(1.5 * 1024 * 1024 * 1024)
 _RAM_PER_WORKER = 400 * 1024 * 1024

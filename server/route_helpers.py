@@ -112,6 +112,24 @@ def _created_iso(value):
     return str(value or "")
 
 
+def _preflight(assessment):
+    from server.ledger_apply import preflight_public
+    if not assessment:
+        return None
+    return preflight_public(assessment)
+
+
+def _shadow_brief(shadow):
+    if not isinstance(shadow, dict):
+        return None
+    return {
+        "compared": shadow.get("compared") or 0,
+        "matches": shadow.get("matches") or 0,
+        "material_count": shadow.get("material_count") if shadow.get("material_count") is not None else len(shadow.get("material") or []),
+        "legacy_is_oracle": False,
+    }
+
+
 def run_summary(doc, perms=None):
     manifest = doc.get("manifest") or None
     if manifest is not None and perms is not None:
@@ -130,4 +148,7 @@ def run_summary(doc, perms=None):
         "generate_progress": doc.get("generate_progress") or None,
         "pdf_catalog": doc.get("pdf_catalog") or [],
         "manifest": manifest,
+        "preflight": _preflight(doc.get("opening_assessment")),
+        "ledger_publication": doc.get("ledger_publication") or None,
+        "shadow_comparison": _shadow_brief(doc.get("shadow_comparison")),
     }

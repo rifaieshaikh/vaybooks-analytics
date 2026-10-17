@@ -1,9 +1,8 @@
 # Settlement and customer intelligence implementation plan
 
 Date: 2026-10-17  
-Status: Phases 0–2 are implemented in the shared ledger. Customer, collection,
-cash, buying, and report screens still use the previous settlement. Phase 3
-connects them.
+Status: Phases 0–3 are implemented. Customer, group, rep, stock, collection,
+dashboard, and report screens read the shared ledger. Phases 4–7 are open.
 
 ## Outcome and scope
 
@@ -276,25 +275,25 @@ and opening credits. No future invoice allocation or silent unmatched fallback.
 
 ## Phase 3 — Persist, compare and integrate across the application
 
-- [ ] Store source IDs, link evidence, reversal lineage, calculation/policy versions,
+- [x] Store source IDs, link evidence, reversal lineage, calculation/policy versions,
   source versions, cutoffs and exceptions. Persist confirmed instructions separately
   from derived allocations and separately from promise/action attribution.
-- [ ] Run the new engine in shadow mode on representative datasets. Explain every
+- [x] Run the new engine in shadow mode on representative datasets. Explain every
   material difference from legacy results; the legacy result is not the oracle.
-- [ ] Add restart-safe, idempotent calculation and invalidation for imports, corrections,
+- [x] Add restart-safe, idempotent calculation and invalidation for imports, corrections,
   account merges, allocation changes, reversals and policy updates. Keep org isolation.
-- [ ] Route customer Due/Settlements, groups, reps, business rollups, dashboard,
+- [x] Route customer Due/Settlements, groups, reps, business rollups, dashboard,
   collection analytics, Ordering, Order check, statements and exports through the
   shared results. Audit callers so old attribution logic is not left active.
-- [ ] Integrate stock opening/movement bridges into Items, Stock, inventory analytics
+- [x] Integrate stock opening/movement bridges into Items, Stock, inventory analytics
   and reorder evidence. Retain the opening/source versions in report manifests and
   expose preflight assessments through the existing import/setup/Create workflows.
-- [ ] Snapshot results for Create runs; identify current operational views separately.
+- [x] Snapshot results for Create runs; identify current operational views separately.
   Rebuilds create new versions and do not silently rewrite previous report runs.
-- [ ] Add an exception queue for unresolved references, missing opening evidence,
+- [x] Add an exception queue for unresolved references, missing opening evidence,
   conflicting allocations and reconciliation differences, with correction actions.
-- [ ] Expose receipt-to-invoice links, unused credits and evidence in customer UI.
-- [ ] Gate rollout by organization/install with a recorded engine version. Back up
+- [x] Expose receipt-to-invoice links, unused credits and evidence in customer UI.
+- [x] Gate rollout by organization/install with a recorded engine version. Back up
   before migration, rehearse restoration and preserve old snapshots and source rows.
   A rollback must not discard confirmed instructions entered after migration.
 
@@ -496,3 +495,55 @@ Changed code: `vay/ledger.py`, `vay/domain.py`, `vay/config.py`,
 
 Node is not installed in this environment, so the new import types were not
 opened in the browser. They are listed in the import screen source.
+
+## Phase 3 start
+
+Date: 2026-10-17
+
+Derived ledger results are stored as `ledger_result` rows and replaced only when
+the source digest, confirmed links, policy, engine version, or cutoff changes.
+A repeated publish of the same inputs keeps the existing rows. Confirmed
+instructions are `ledger_link` rows. Voiding one keeps the row and drops it from
+the next replay. Collection promise allocations stay in `collection_allocation`.
+Imports and account merges clear the publication marker. One organization cannot
+read or replace another organization's publication.
+
+Each Create run stores `shadow_comparison`. A material difference explains the
+ledger rule that produced it. The previous settlement remains the amount on
+screen and is only a comparison reading.
+
+`tests/test_phase3_persist.py` covers idempotent publish, confirmed links,
+shadow explanations, invalidation, and organization isolation. 44 ledger tests
+passed with the Phase 0–2 tests.
+
+## Phase 3 complete
+
+Date: 2026-10-17
+
+The organization policy `ledger_engine` defaults to engine version `1`. Setting
+it to `legacy` returns screens to the previous settlement and leaves confirmed
+links in place. A backup restore replaces rows; it is separate from that rollback.
+
+Live customer, group, rep, business, collection, order-check, and statement
+figures read the current ledger. An unknown opening is not shown as zero and is
+not replaced with the ARR figure. The due on screen is the known open net, and
+`balance_exact` is false. A saved Create run is stamped `result_scope: snapshot`
+and a later run does not rewrite it. Stock and item views carry the opening
+bridge. Create shows the preflight counts. `/api/ledger/exceptions` lists
+missing openings, unresolved references, and reconciliation differences.
+The customer Ledger tab shows receipt-to-invoice links, unused credits, and
+evidence.
+
+`tests/test_phase3_apply.py` covers shared profile and directory balances,
+rollback that keeps links, backup restore, and a new run that leaves the
+previous assessment unchanged.
+
+The create request returns `queued` and finishes in the background. With
+synchronous jobs it returns the finished status instead. The customer list
+includes the AR gap, opening, and balance. An item line without a party takes
+the group from the party master, and a placeholder group does not replace it.
+A PDF download without a saved snapshot still removes reports the caller cannot
+view.
+
+The Customers ledger, Stock opening note, and Create opening check were opened
+in the browser against a local memory store.

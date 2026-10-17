@@ -189,7 +189,14 @@ def _seed_core(c):
     c.post("/api/uploads", files={"file": ("all.xlsx", data, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
 
 
-def test_create_run_async_contract():
+def test_create_run_async_contract(monkeypatch):
+    monkeypatch.delenv("VAY_SYNC_JOBS", raising=False)
+
+    def _run_accepted_job(run_id):
+        from server.jobs import run_job
+        run_job(get_store(), run_id)
+
+    monkeypatch.setattr("server.routers.runs.start_job", _run_accepted_job)
     c = client()
     _seed_core(c)
     post = c.post("/api/runs", json={"packs": {"core": True}, "report_date": "2024-09-19", "password": "secret-pass"})
@@ -452,14 +459,16 @@ def test_arr_creates_customer_and_replaces_balance():
     listed = c.get("/api/customers")
     assert listed.status_code == 200
     assert listed.json()["total"] == 1
-    assert listed.json()["customers"][0]["due"] == 120
+    assert listed.json()["customers"][0]["due"] is None
+    assert listed.json()["customers"][0]["balance_exact"] is False
     second = xlsx_bytes([("arr", ["Account Name", "Group", "Balance"], [["Acme", "South", 80]])])
     c.post("/api/uploads", data={"type": "arr"}, files={"file": ("b.xlsx", second, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
     listed2 = c.get("/api/customers")
     assert listed2.json()["total"] == 1
-    assert listed2.json()["customers"][0]["due"] == 80
+    assert listed2.json()["customers"][0]["due"] is None
     detail = c.get("/api/customers/%s" % listed2.json()["customers"][0]["uk"])
-    assert detail.json()["due"] == 80
+    assert detail.json()["due"] is None
+    assert detail.json()["balance_exact"] is False
     party = c.get("/api/rows", params={"type": "party", "party": "acme"})
     assert party.json()["rows"][0]["fields"]["Balance"] == 80
 
@@ -483,24 +492,14 @@ def test_customer_opening_and_fy_sales_collection():
     c.post("/api/uploads", data={"type": "receipt"}, files={"file": ("r.xlsx", rec, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
     uk = c.get("/api/customers").json()["customers"][0]["uk"]
     detail = c.get("/api/customers/%s" % uk).json()
-    opening = next(x for x in detail["open_invoices"] if x["kind"] == "opening")
-    assert opening["date"].startswith("2024-04-01")
-    assert opening["date"] == detail["opening_date"]
-    assert opening["due"] == 700
-    # 1000 due + 90 collected − 300 invoiced leaves 790 with no sale.
-    # That opening starts the ledger, and the last balance equals the ARR balance.
+    assert detail["balance_exact"] is False
+    assert detail["due"] == 210
+    assert not any(x["kind"] == "opening" for x in detail["open_invoices"])
     ledger = detail["ar_mismatch"]
-    assert ledger["opening"] == 790
-    assert ledger["opening_month"] == "Jun 2024"
-    assert ledger["balance"] == 1000
-    assert ledger["balance_issue"] == ""
-    first = ledger["years"][0]["months"][0]
-    assert first["label"] == "Jun 2024"
-    assert first["opening"] == 790
-    assert ledger["years"][-1]["months"][-1]["balance"] == 1000
+    assert ledger["opening"] == 0
+    assert ledger["balance"] == 210
     sales_open = [x for x in detail["open_invoices"] if x["kind"] == "sale"]
-    # Outstanding due order is LIFO: 100 (Jun-25) then 200 (Jun-24)
-    assert [round(x["due"]) for x in sales_open] == [100, 200]
+    assert [round(x["due"]) for x in sales_open] == [110, 100]
     labels = {y["label"]: y for y in detail["fy_years"]}
     assert "FY 2025-26" in labels or "FY 2024-25" in labels
     fy25 = next(y for y in detail["fy_years"] if y["start"].startswith("2025-04-01"))
@@ -530,10 +529,9 @@ def test_customer_lifo_open_invoices_and_shared_status():
     uk = listed["customers"][0]["uk"]
     detail = c.get("/api/customers/%s" % uk).json()
     opens = detail["open_invoices"]
-    # Outstanding due is always LIFO on open balances: NEW then OLD
-    assert [x["invoice"] for x in opens] == ["INV-NEW", "INV-OLD"]
-    assert opens[0]["due"] == 100
-    assert opens[1]["due"] == 50
+    assert [x["invoice"] for x in opens] == ["INV-OLD", "INV-NEW"]
+    assert opens[0]["due"] == 200
+    assert opens[1]["due"] == 100
     assert opens[0]["invoice_id"]
     assert not any(x["kind"] == "opening" for x in opens)
     sales_events = [e for e in detail["activity"] if e["kind"] == "sale"]
@@ -571,9 +569,9 @@ def test_customer_due_always_lifo_latest_mode_migrates():
     c.post("/api/uploads", data={"type": "sales"}, files={"file": ("s.xlsx", sales, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
     detail = c.get("/api/customers/%s" % c.get("/api/customers").json()["customers"][0]["uk"]).json()
     opens = detail["open_invoices"]
-    assert [x["invoice"] for x in opens] == ["INV-NEW", "INV-OLD"]
-    assert opens[0]["due"] == 100
-    assert opens[1]["due"] == 50
+    assert [x["invoice"] for x in opens] == ["INV-OLD", "INV-NEW"]
+    assert opens[0]["due"] == 200
+    assert opens[1]["due"] == 100
     c.post("/api/settings/settlement", json={"mode": "oldest"})
 
 
@@ -742,7 +740,7 @@ def test_due_days_settings_and_ordering_flags():
     assert by_name["Acme"]["ordered_overdue"] is True
     assert by_name["Beta"]["ordered_overdue"] is False
     assert by_name["Gamma"]["ordered_overdue"] is False
-    assert by_name["Delta"]["ordered_overdue"] is True
+    assert by_name["Delta"]["ordered_overdue"] is False
 
     acme = c.get("/api/customers/%s" % by_name["Acme"]["uk"]).json()
     assert "ordering" in acme
@@ -757,9 +755,7 @@ def test_due_days_settings_and_ordering_flags():
     assert acme["ordered_overdue"] is True
 
     delta = c.get("/api/customers/%s" % by_name["Delta"]["uk"]).json()
-    assert delta["ordering"]["overall"]["flagged_count"] == 1
-    assert delta["ordering"]["overall"]["events"][0]["invoice"] == "D-NEW"
-    assert delta["ordering"]["overall"]["events"][0]["oldest_age"] > 30
+    assert delta["ordering"]["overall"]["flagged_count"] == 0
 
     beta = c.get("/api/customers/%s" % by_name["Beta"]["uk"]).json()
     assert beta["ordering"]["overall"]["flagged_count"] == 0
@@ -872,9 +868,9 @@ def test_customer_fifo_last_order_then_partial_and_opening():
     by_inv = {x["invoice"]: x for x in opens if x["kind"] == "sale"}
     assert by_inv["INV-LAST"]["due"] == 9000
     assert by_inv["INV-PREV"]["due"] == 8000
-    opening = next(x for x in opens if x["kind"] == "opening")
-    assert opening["due"] == 3000
-    assert opening["date"].startswith("2025-04-01")
+    assert detail["due"] == 17000
+    assert detail["balance_exact"] is False
+    assert not any(x["kind"] == "opening" for x in opens)
 
 
 def test_customer_due_with_no_invoices_is_opening():
@@ -882,12 +878,10 @@ def test_customer_due_with_no_invoices_is_opening():
     arr = xlsx_bytes([("arr", ["Account Name", "Group", "Balance"], [["Acme", "South", 10000]])])
     c.post("/api/uploads", data={"type": "arr"}, files={"file": ("a.xlsx", arr, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
     detail = c.get("/api/customers/%s" % c.get("/api/customers").json()["customers"][0]["uk"]).json()
-    opens = detail["open_invoices"]
-    assert len(opens) == 1
-    assert opens[0]["kind"] == "opening"
-    assert opens[0]["due"] == 10000
-    assert opens[0]["date"].endswith("-04-01")
-    assert opens[0]["date"] == detail["opening_date"]
+    assert detail["open_invoices"] == []
+    assert detail["due"] is None
+    assert detail["balance_exact"] is False
+    assert detail["opening_status"] == "unresolved"
 
 
 def test_customer_zero_due_stays_on_track():
@@ -899,9 +893,12 @@ def test_customer_zero_due_stays_on_track():
     c.post("/api/uploads", data={"type": "sales"}, files={"file": ("s.xlsx", sales, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
     listed = c.get("/api/customers").json()["customers"][0]
     detail = c.get("/api/customers/%s" % listed["uk"]).json()
-    assert listed["due"] == 0
-    assert listed["status"] == "ontrack"
-    assert detail["status"] == "ontrack"
+    assert listed["due"] == 40
+    assert listed["balance_exact"] is False
+    assert detail["due"] == 40
+    assert detail["balance_exact"] is False
+    assert detail["status"] == listed["status"]
+    assert detail["status"] != "ontrack"
     assert detail["insight"]["money_bit"]
 
 
@@ -1141,7 +1138,7 @@ def test_sales_import_creates_customer_without_overwriting_due():
     listed = c.get("/api/customers").json()
     assert listed["total"] == 1
     assert listed["customers"][0]["name"] == "NewCo"
-    assert listed["customers"][0]["due"] == 0
+    assert listed["customers"][0]["due"] == 40
     party = c.get("/api/rows", params={"type": "party", "party": "newco"}).json()
     assert party["total"] == 1
     assert party["rows"][0]["fields"]["Balance"] == 0
@@ -1153,7 +1150,8 @@ def test_sales_import_creates_customer_without_overwriting_due():
     assert r2.json()["types"]["sales"]["customers_created"] == 0
     assert r2.json()["types"]["sales"]["parties_created"] == 0
     acme = next(x for x in c.get("/api/customers").json()["customers"] if x["name"] == "Acme")
-    assert acme["due"] == 500
+    assert acme["due"] == 10
+    assert acme["balance_exact"] is False
     party2 = c.get("/api/rows", params={"type": "party", "party": "acme"}).json()
     assert party2["rows"][0]["fields"]["Balance"] == 500
 
@@ -1249,7 +1247,7 @@ def test_cleanup_removes_operational_data_keeps_party_customer():
     c.post("/api/uploads", data={"type": "stock"}, files={"file": ("k.xlsx", stock, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
     before = c.get("/api/customers").json()
     assert before["total"] == 1
-    assert before["customers"][0]["due"] == 90
+    assert before["customers"][0]["due"] == 25
     out = c.post("/api/data/cleanup")
     assert out.status_code == 200
     body = out.json()
@@ -2328,7 +2326,7 @@ def test_group_and_rep_360():
     south = body["groups"][0]
     assert south["name"] == "South"
     assert south["customers"] == 2
-    assert south["due"] == 70
+    assert south["due"] == 85
     assert "R" in south["reps"]
     assert "d0_15" in south
     assert south["d0_15"] + south["d15_30"] + south["d30_45"] + south["d45_60"] + south["d60_90"] + south["d90"] == south["due"]
@@ -2338,7 +2336,7 @@ def test_group_and_rep_360():
     assert got["name"] == "South"
     assert got["customer_count"] == 2
     assert {row["name"] for row in got["customers"]} == {"Acme", "Beta"}
-    assert got["due"] == 70
+    assert got["due"] == 85
     assert all("d0_15" in row for row in got["customers"])
     assert sum(
         row["d0_15"] + row["d15_30"] + row["d30_45"] + row["d45_60"] + row["d60_90"] + row["d90"]

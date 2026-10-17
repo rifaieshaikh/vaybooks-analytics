@@ -1128,7 +1128,8 @@ def _collection_invoice_text(row):
         return "Invoice detail unavailable"
     parts = []
     for inv in row.get("invoices") or []:
-        label = "%s remaining %s" % (inv.get("invoice"), inv.get("remaining"))
+        number = str(inv.get("invoice") or "Sale").replace("\x1f", " ").strip() or "Sale"
+        label = "%s remaining %s" % (number, inv.get("remaining") if inv.get("remaining") is not None else inv.get("amount") or 0)
         if inv.get("basis") == "estimated":
             label += " (estimated)"
         parts.append(label)

@@ -342,6 +342,12 @@ export default function CreatePage({ onQueued, busy, run, onGo, user }) {
         <button type="button" disabled={busy} onClick={openNew}>Create reports</button>
       </div>
       <p className="muted">Each run keeps the sheets that succeeded. Open a run to see which reports failed and why. Rerun failed is available on the latest run.</p>
+      {run && run.preflight ? (
+        <p className="muted">
+          Opening check: {run.preflight.unresolved_customers || 0} customers and {run.preflight.unresolved_items || 0} items still need an imported opening.
+          {run.shadow_comparison ? " Shadow comparison found " + (run.shadow_comparison.material_count || 0) + " differences. The previous settlement is only a comparison." : ""}
+        </p>
+      ) : null}
       <div className="table-wrap">
         <table>
           <thead>

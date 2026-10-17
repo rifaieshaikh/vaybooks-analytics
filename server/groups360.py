@@ -114,6 +114,8 @@ def _rollup_slot(name, uk=None, bands=None):
         "name": name,
         "customers": 0,
         "due": 0.0,
+        "due_known": 0,
+        "balance_exact": True,
         "statuses": set(),
         "urgent_count": 0,
         "followup_count": 0,
@@ -129,7 +131,14 @@ def _rollup_slot(name, uk=None, bands=None):
 def add_member_to_rollup(slot, member):
     """Accumulate one directory member into a group/rep rollup row."""
     slot["customers"] += 1
-    slot["due"] += member.get("due") or 0
+    due = member.get("due")
+    if due is None:
+        slot["balance_exact"] = False
+    else:
+        slot["due"] += due
+        slot["due_known"] = slot.get("due_known", 0) + 1
+        if member.get("balance_exact") is False:
+            slot["balance_exact"] = False
     st = member.get("status") or "ontrack"
     slot["statuses"].add(st)
     if st == "urgent":
@@ -154,10 +163,14 @@ def finish_rollups(slots):
     out = []
     for slot in slots:
         statuses = slot.pop("statuses", set()) or set()
-        status = rollup_status(statuses, slot.get("due") or 0)
+        if slot.get("customers") and not slot.get("due_known"):
+            slot["due"] = None
+            slot["balance_exact"] = False
+        due_for_status = 0 if slot.get("due") is None else slot.get("due")
+        status = rollup_status(statuses, due_for_status)
         slot["status"] = status
         slot["status_label"] = _status_label(status)
-        slot["credit"] = (slot.get("due") or 0) < 0
+        slot["credit"] = False if slot.get("due") is None else slot["due"] < 0
         flat = flatten_owe(slot.get("owe_buckets") or {})
         slot.update(flat)
         slot["ytd_sales"] = round(number_(slot.get("ytd_sales")), 2)

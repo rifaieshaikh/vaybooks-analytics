@@ -193,6 +193,8 @@ def test_pre_period_reference_uses_opening_debt_only():
         "amount": D("40"),
         "evidence": "inferred",
         "effective_date": date(2024, 6, 1),
+        "invoice_date": date(2023, 1, 1),
+        "invoice_number": "OLD",
         "cash": True,
         "credit_kind": "receipt",
         "referenced": True,
