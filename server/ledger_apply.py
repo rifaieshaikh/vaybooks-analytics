@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from vay.dates import parse_date
 from vay.ledger import ENGINE_VERSION
-from vay.payments import payment_summary
+from vay.payments import payment_behavior, payment_summary
 from vay.settlement import bucket_key, empty_buckets
 
 from server.ledger_surface import current_assessment
@@ -191,6 +191,16 @@ def project_customer(customer, as_of, bands=None, start_month=None):
             start_month=start_month,
             coverage=customer.get("coverage") or {},
         ),
+        "payment_behavior": payment_behavior(
+            settlement.get("timing") or [],
+            settlement.get("open_debits") or [],
+            settlement.get("unused_credits") or [],
+            settlement.get("posted") or [],
+            reconciliation=settlement.get("reconciliation") or {},
+            as_of=as_of_day or as_of,
+            start_month=start_month,
+            coverage=customer.get("coverage") or {},
+        ),
     }
 
 
@@ -220,7 +230,29 @@ def apply_ledger_customer(store, detail):
     detail.update(projected)
     detail["ledger_engine"] = ENGINE_VERSION
     detail["result_scope"] = "operational"
+    detail["payment_behavior"] = payment_behavior(
+        (row.get("settlement") or {}).get("timing") or [],
+        (row.get("settlement") or {}).get("open_debits") or [],
+        (row.get("settlement") or {}).get("unused_credits") or [],
+        (row.get("settlement") or {}).get("posted") or [],
+        reconciliation=(row.get("settlement") or {}).get("reconciliation") or {},
+        as_of=detail.get("as_of"),
+        start_month=detail.get("fiscal_year_start_month"),
+        coverage=row.get("coverage") or {},
+        promises=_promises_for(store, detail.get("name"), detail.get("as_of")),
+    )
     return detail
+
+
+def _promises_for(store, name, as_of):
+    if not name:
+        return None
+    try:
+        from server.collection import customer_follow_up
+        follow = customer_follow_up(store, name, as_of)
+    except ValueError:
+        return None
+    return follow.get("promises") or []
 
 
 def apply_directory_row(customer, row, as_of, bands, start_month):

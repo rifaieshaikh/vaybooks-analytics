@@ -511,6 +511,12 @@ function ActivityTable({ rows, shown, canSales, onOpenInvoice }) {
 
 const DAY_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
+function invoiceLabel(value) {
+  const text = String(value || "");
+  if (!text || text.includes("\u001f")) return "Sale";
+  return text;
+}
+
 function dayLabel(value) {
   const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(value || ""));
   if (!match) return "—";
@@ -577,13 +583,67 @@ function DenseTable({ columns, rows, empty, rowKey }) {
   );
 }
 
+function metricText(metric, suffix) {
+  if (!metric || !metric.available || metric.value == null) return "Unavailable";
+  if (suffix === "days") return metric.value + (metric.value === 1 ? " day" : " days");
+  return money(metric.value);
+}
+
+function metricDetail(metric) {
+  if (!metric) return "";
+  if (!metric.available) return metric.reason || "";
+  const excluded = Number(metric.excluded) ? " · " + money(metric.excluded) + " excluded" : "";
+  return money(metric.denominator) + " included" + excluded;
+}
+
+function MetricTile({ label, metric, suffix }) {
+  return (
+    <div className="card buy-tile">
+      <span className="muted">{label}</span>
+      <strong>{metricText(metric, suffix)}</strong>
+      <span className="quiet">{metricDetail(metric)}</span>
+    </div>
+  );
+}
+
+function timingRows(metric) {
+  return (metric?.transactions || []).map((row) => ({
+    ...row,
+    date_label: dayLabel(row.date),
+    invoice_label: invoiceLabel(row.invoice),
+    evidence_label: settlementLabel(row.evidence),
+    days_label: row.days == null ? "—" : row.days + " days",
+  }));
+}
+
+const TIMING_COLUMNS = [
+  { id: "date", label: "Date", cell: (row) => row.date_label },
+  { id: "invoice_label", label: "Invoice", cell: (row) => row.invoice_label },
+  { id: "evidence_label", label: "Evidence", cell: (row) => <EvidencePill value={row.evidence} /> },
+  { id: "days", label: "Days", numeric: true, cell: (row) => row.days_label },
+  { id: "amount", label: "Amount", numeric: true, cell: (row) => money(row.amount) },
+];
+
+function shareText(value) {
+  return value == null ? "Unavailable" : value + "%";
+}
+
 function PaymentsPanel({ detail }) {
   const payments = detail.payments;
-  const [view, setView] = useState("all");
+  const behavior = detail.payment_behavior;
+  const confirmedLinks = (behavior?.confirmed?.transactions || []).length;
+  const [section, setSection] = useState("receipts");
+  const [period, setPeriod] = useState("all");
+  const [evidence, setEvidence] = useState(confirmedLinks ? "confirmed" : "inferred");
+  useEffect(() => {
+    setSection("receipts");
+    setPeriod("all");
+    setEvidence((behavior?.confirmed?.transactions || []).length ? "confirmed" : "inferred");
+  }, [detail.uk]);
   if (!payments) {
     return (
       <div className="card">
-        <h3>Payments</h3>
+        <h3>Receipts</h3>
         <p className="muted">Cash receipts are summarized when the shared ledger is on.</p>
       </div>
     );
@@ -594,8 +654,8 @@ function PaymentsPanel({ detail }) {
   const currentIds = new Set(current.transactions || []);
   const priorIds = new Set(prior.transactions || []);
   const rows = (payments.transactions || []).filter((row) => {
-    if (view === "current") return currentIds.has(row.source_id);
-    if (view === "prior") return priorIds.has(row.source_id);
+    if (period === "current") return currentIds.has(row.source_id);
+    if (period === "prior") return priorIds.has(row.source_id);
     return true;
   }).map((row) => ({
     ...row,
@@ -616,51 +676,157 @@ function PaymentsPanel({ detail }) {
     { id: "evidence_label", label: "Settlement", cell: (row) => <EvidencePill value={row.settlement_evidence} /> },
     { id: "amount", label: "Amount", numeric: true, cell: (row) => money(row.amount) },
   ];
+  const partial = behavior?.partial || {};
+  const full = behavior?.full_settlement || {};
+  const coverage = behavior?.coverage || {};
+  const movement = behavior?.movement || {};
+  const promises = behavior?.promises || {};
+  const comparison = behavior?.age_comparison || {};
+  const selected = evidence === "confirmed" ? behavior?.confirmed : behavior?.inferred;
+  const timingTable = timingRows(selected?.invoice_age);
+  const promiseRows = (promises.transactions || []).map((row) => ({
+    ...row,
+    date_label: dayLabel(row.date),
+    status_label: String(row.status || "").split("_").join(" "),
+  }));
+  const openAmount = behavior?.open_invoices?.amount;
+  const overdueAmount = behavior?.open_invoices?.overdue_amount;
   return (
     <div className="card">
-      <h3>Payments</h3>
-      <p className="muted">Cash receipts only. Credit notes are separate and are not payment behavior. Inferred settlement is not confirmed payment timing.</p>
-      <div className="buy-tiles" style={{ marginTop: 12 }}>
-        <div className="card buy-tile">
-          <span className="muted">Cash received</span>
-          <strong>{money(payments.cash_total)}</strong>
-        </div>
-        <div className="card buy-tile">
-          <span className="muted">Occasions</span>
-          <strong>{payments.occasions || 0}</strong>
-        </div>
-        <div className="card buy-tile">
-          <span className="muted">Typical amount</span>
-          <strong>{payments.typical_amount == null ? "Unavailable" : money(payments.typical_amount)}</strong>
-        </div>
-        <div className="card buy-tile">
-          <span className="muted">Median gap</span>
-          <strong>{gap}</strong>
-        </div>
+      <h3>Receipts</h3>
+      <div className="chips" style={{ marginTop: 12 }}>
+        <button type="button" className={section === "receipts" ? "" : "secondary"} onClick={() => setSection("receipts")}>Receipts</button>
+        <button type="button" className={section === "timing" ? "" : "secondary"} onClick={() => setSection("timing")}>Timing</button>
+        <button type="button" className={section === "coverage" ? "" : "secondary"} onClick={() => setSection("coverage")}>Coverage</button>
+        <button type="button" className={section === "movement" ? "" : "secondary"} onClick={() => setSection("movement")}>Movement</button>
       </div>
-      <div className="chips" style={{ marginTop: 16 }}>
-        <button type="button" className={view === "all" ? "" : "secondary"} onClick={() => setView("all")}>All receipts</button>
-        <button type="button" className={view === "current" ? "" : "secondary"} onClick={() => setView("current")}>{current.label || "This year"}</button>
-        <button type="button" className={view === "prior" ? "" : "secondary"} onClick={() => setView("prior")} disabled={!trend.available}>{prior.label || "Earlier year"}</button>
-      </div>
-      {trend.available ? (
-        <p className="muted" style={{ marginTop: 12 }}>
-          {current.label}: {money(current.cash_total)} across {current.occasions || 0} receipts.
-          {" "}{prior.label}: {money(prior.cash_total)} across {prior.occasions || 0} receipts.
-          {" "}Change {trend.cash_change_percent == null ? "unavailable" : trend.cash_change_percent + "%"}.
-        </p>
-      ) : (
-        <p className="muted" style={{ marginTop: 12 }}>{trend.reason || "The earlier window is not available."}</p>
-      )}
-      {payments.undated_count ? (
-        <p className="muted">{payments.undated_count} receipts have no date ({money(payments.undated_amount)}). They stay in the total and out of the gap.</p>
-      ) : null}
-      <DenseTable columns={columns} rows={rows} empty="No cash receipts in this period." rowKey={(row) => row.source_id} />
-      {notes.length ? (
+
+      {section === "receipts" ? (
         <>
-          <h4 className="quiet" style={{ marginTop: 16 }}>Credit notes · {money(payments.non_cash_total)}</h4>
-          <DenseTable columns={columns} rows={notes} empty="No credit notes." rowKey={(row) => row.source_id} />
+          <p className="muted">Cash receipts only. Credit notes are separate and are not payment behavior.</p>
+          <div className="buy-tiles">
+            <div className="card buy-tile"><span className="muted">Cash received</span><strong>{money(payments.cash_total)}</strong></div>
+            <div className="card buy-tile"><span className="muted">Occasions</span><strong>{payments.occasions || 0}</strong></div>
+            <div className="card buy-tile"><span className="muted">Typical amount</span><strong>{payments.typical_amount == null ? "Unavailable" : money(payments.typical_amount)}</strong></div>
+            <div className="card buy-tile"><span className="muted">Median gap</span><strong>{gap}</strong></div>
+          </div>
+          <div className="chips">
+            <button type="button" className={period === "all" ? "" : "secondary"} onClick={() => setPeriod("all")}>All receipts</button>
+            <button type="button" className={period === "current" ? "" : "secondary"} onClick={() => setPeriod("current")}>{current.label || "This year"}</button>
+            <button type="button" className={period === "prior" ? "" : "secondary"} onClick={() => setPeriod("prior")} disabled={!trend.available}>{prior.label || "Earlier year"}</button>
+          </div>
+          {trend.available ? (
+            <p className="muted">
+              {current.label}: {money(current.cash_total)} across {current.occasions || 0} receipts.
+              {" "}{prior.label}: {money(prior.cash_total)} across {prior.occasions || 0} receipts.
+              {" "}Change {trend.cash_change_percent == null ? "unavailable" : trend.cash_change_percent + "%"}.
+            </p>
+          ) : (
+            <p className="muted">{trend.reason || "The earlier window is not available."}</p>
+          )}
+          {payments.undated_count ? (
+            <p className="muted">{payments.undated_count} receipts have no date ({money(payments.undated_amount)}). They stay in the total and out of the gap.</p>
+          ) : null}
+          {rows.length ? (
+            <DenseTable columns={columns} rows={rows} empty="No cash receipts in this period." rowKey={(row) => row.source_id} />
+          ) : (
+            <p className="muted">No cash receipts in this period.</p>
+          )}
+          {notes.length ? (
+            <>
+              <h4 className="quiet" style={{ marginTop: 16 }}>Credit notes · {money(payments.non_cash_total)}</h4>
+              <DenseTable columns={columns} rows={notes} empty="No credit notes." rowKey={(row) => row.source_id} />
+            </>
+          ) : null}
         </>
+      ) : null}
+
+      {section === "timing" ? (
+        behavior ? (
+          <>
+            <p className="muted">{behavior.note}</p>
+            <div className="chips">
+              <button type="button" className={evidence === "confirmed" ? "" : "secondary"} onClick={() => setEvidence("confirmed")}>Confirmed</button>
+              <button type="button" className={evidence === "inferred" ? "" : "secondary"} onClick={() => setEvidence("inferred")}>Inferred</button>
+            </div>
+            <div className="buy-tiles">
+              <MetricTile label="Invoice age" metric={selected?.invoice_age} suffix="days" />
+              <MetricTile label="Days overdue" metric={selected?.days_overdue} suffix="days" />
+              <MetricTile label="Partial payment" metric={evidence === "confirmed" ? partial.confirmed : partial.inferred} suffix="days" />
+              <MetricTile label="Full settlement" metric={evidence === "confirmed" ? full.confirmed : full.inferred} suffix="days" />
+            </div>
+            <p className="muted">A partial payment is timed on its own. Full settlement weights the invoice once, on the link that cleared it.</p>
+            {comparison.available ? (
+              <p className="muted">
+                {comparison.current?.label}: {metricText(comparison.current, "days")}.
+                {" "}{comparison.prior?.label}: {metricText(comparison.prior, "days")}.
+              </p>
+            ) : (
+              <p className="muted">{comparison.reason || "The earlier timing window is not available."}</p>
+            )}
+            <p className="muted">Still open {money(openAmount)}, overdue {money(overdueAmount)}. Those invoices stay on Due and are left out of the full-settlement average.</p>
+            {timingTable.length ? (
+              <DenseTable columns={TIMING_COLUMNS} rows={timingTable} empty="" rowKey={(row, index) => (row.source_id || "") + (row.debit_id || "") + index} />
+            ) : null}
+          </>
+        ) : <p className="muted">Payment timing appears when this profile is built from the shared ledger.</p>
+      ) : null}
+
+      {section === "coverage" ? (
+        behavior ? (
+          <>
+            <p className="muted">{coverage.note} Denominator {money(coverage.denominator)}.</p>
+            <div className="buy-tiles">
+              <div className="card buy-tile"><span className="muted">Confirmed</span><strong>{money(coverage.confirmed)}</strong><span className="quiet">{shareText(coverage.confirmed_share)}</span></div>
+              <div className="card buy-tile"><span className="muted">Inferred</span><strong>{money(coverage.inferred)}</strong><span className="quiet">{shareText(coverage.inferred_share)}</span></div>
+              <div className="card buy-tile"><span className="muted">Unresolved</span><strong>{money(coverage.unresolved)}</strong><span className="quiet">{shareText(coverage.unresolved_share)}</span></div>
+              <div className="card buy-tile"><span className="muted">Unknown age</span><strong>{money(coverage.unknown_age)}</strong><span className="quiet">{shareText(coverage.unknown_age_share)}</span></div>
+            </div>
+          </>
+        ) : <p className="muted">Coverage appears when this profile is built from the shared ledger.</p>
+      ) : null}
+
+      {section === "movement" ? (
+        behavior ? (
+          <>
+            <p className="muted">{movement.note} Cutoff {dayLabel(movement.cutoff)}. Reconciliation {movement.reconciliation || "none"}.</p>
+            <div className="buy-tiles">
+              <MetricTile label="Debt raised" metric={movement.growth} />
+              <MetricTile label="Cash applied" metric={movement.cash_reduction} />
+              <MetricTile label="Credit notes applied" metric={movement.non_cash_reduction} />
+              <MetricTile label="Advance" metric={movement.advance} />
+              <MetricTile label="Reversals" metric={movement.reversals} />
+            </div>
+            {movement.trend?.available ? (
+              <p className="muted">
+                {movement.trend.current?.label}: raised {money(movement.trend.current?.growth)}, cash applied {money(movement.trend.current?.cash_reduction)}.
+                {" "}{movement.trend.prior?.label}: raised {money(movement.trend.prior?.growth)}, cash applied {money(movement.trend.prior?.cash_reduction)}.
+              </p>
+            ) : (
+              <p className="muted">{movement.trend?.reason || "The earlier movement window is not available."}</p>
+            )}
+            <h4 className="quiet" style={{ marginTop: 16 }}>Promises</h4>
+            <p className="muted">{promises.note}</p>
+            {promises.available && promiseRows.length ? (
+              <>
+                <p className="muted">{promises.count || 0} promises · kept {money(promises.kept)} · partial {money(promises.partial)} · missed {money(promises.missed)} · awaiting data {money(promises.awaiting_data)}.</p>
+                <DenseTable
+                  columns={[
+                    { id: "date", label: "Promised", cell: (row) => row.date_label },
+                    { id: "status_label", label: "Result", cell: (row) => row.status_label || "—" },
+                    { id: "amount", label: "Amount", numeric: true, cell: (row) => money(row.amount) },
+                    { id: "remaining", label: "Remaining", numeric: true, cell: (row) => money(row.remaining) },
+                  ]}
+                  rows={promiseRows}
+                  empty=""
+                  rowKey={(row) => row.source_id || row.date}
+                />
+              </>
+            ) : (
+              <p className="muted">{promises.reason || "No promise is recorded for this customer."}</p>
+            )}
+          </>
+        ) : <p className="muted">Debt movement appears when this profile is built from the shared ledger.</p>
       ) : null}
     </div>
   );
@@ -769,7 +935,7 @@ function customerTabGroups(detail) {
     { tabs: [
       { id: "due", label: "Due", count: open > 0 ? open : null },
       { id: "settlements", label: "Settlements" },
-      { id: "payments", label: "Payments" },
+      { id: "payments", label: "Receipts" },
       { id: "ledger", label: "Ledger" },
       { id: "ar-mismatch", label: "AR mismatch" },
     ] },

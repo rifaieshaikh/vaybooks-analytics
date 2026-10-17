@@ -1,10 +1,8 @@
 # Settlement and customer intelligence implementation plan
 
 Date: 2026-10-17  
-Status: Phases 0–3 are implemented. Customer, group, rep, stock, collection,
-dashboard, and report screens read the shared ledger. Phase 4 has a cash
-payment summary on the customer profile. The rest of Phase 4 and Phases 5–7
-are open.
+Status: Phases 0–4 are implemented. Customer profiles explain cash receipts,
+confirmed and inferred timing, coverage, and debt movement. Phases 5–7 are open.
 
 ## Outcome and scope
 
@@ -306,15 +304,15 @@ across screens and exports; migration, permissions and rollback checks pass.
 
 - [x] Add a payment summary to existing customer profiles: receipt totals, payment
   occasions, median gap, typical amount and comparable-period trends.
-- [ ] Calculate amount-weighted invoice age and days overdue at allocation for
+- [x] Calculate amount-weighted invoice age and days overdue at allocation for
   confirmed links; present inferred allocation timing separately.
-- [ ] Separate partial-payment timing from time to full settlement. Include still-open
+- [x] Separate partial-payment timing from time to full settlement. Include still-open
   invoices in outstanding/overdue reporting rather than averaging only settled debt.
-- [ ] Exclude unknown-age opening amounts from exact timing metrics; disclose their
+- [x] Exclude unknown-age opening amounts from exact timing metrics; disclose their
   amounts and confirmed/inferred/unresolved coverage by value.
-- [ ] Show debt growth/reduction, advances, reversals and promise results with source
+- [x] Show debt growth/reduction, advances, reversals and promise results with source
   cutoffs and reconciliation status. Keep cash and non-cash reductions separate.
-- [ ] Compare only compatible scopes/windows; retain unavailable results when history
+- [x] Compare only compatible scopes/windows; retain unavailable results when history
   is insufficient. Record exclusions and denominators beside each metric.
 
 Exit gate: each headline drills into its contributing transactions, states the
@@ -563,5 +561,16 @@ cover it, and an empty earlier window does not become a percent. Each receipt
 lists its settlement evidence, so an inferred allocation is not shown as
 confirmed payment timing.
 
-`tests/test_payments.py` covers those cases. The remaining Phase 4 bullets are
-still open.
+`tests/test_payments.py` covers those cases.
+
+Confirmed links have their own amount-weighted invoice age and days overdue.
+Inferred links are a separate average. A payment that leaves a balance is timed
+on its own, and the invoice is weighted once when a link clears it. Still-open
+invoices stay in outstanding and are left out of the full-settlement average.
+Unknown-age amounts are excluded from those averages and shown in coverage by
+value, with confirmed, inferred, and unresolved amounts. Debt raised, cash
+applied, credit notes, unused cash, and reversals are listed through the cutoff
+with the reconciliation state. Promise results use the coverage cutoff, so a
+promise the books do not reach yet is awaiting data. An earlier window is
+withheld when history does not cover it, and each average shows the amount
+included and the amount excluded.

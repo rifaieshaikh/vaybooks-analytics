@@ -799,6 +799,8 @@ def settle(
         "currency": scope[3],
         "allocations": alloc_out,
         "receipts": _standing_receipts(by_credit, seen_credits, live_allocations),
+        "timing": _timing_lines(allocations, by_debit),
+        "posted": _posted_items(by_debit, by_credit, open_ids, seen_credits),
         "open_debits": open_debits,
         "unused_credits": unused_credits,
         "suggestions": suggestions,
@@ -828,6 +830,82 @@ def _standing_receipts(by_credit, seen_credits, live_allocations):
             "effective_date": credit.effective_date,
             "cash": credit.cash,
             "evidence": labels,
+        })
+    return rows
+
+
+def _timing_lines(allocations, by_debit):
+    """Age and overdue at each surviving allocation, plus whether it cleared the invoice."""
+    live = [row for row in allocations if row.amount > 0]
+    applied = {}
+    for row in live:
+        applied[row.debit_id] = money(applied.get(row.debit_id, 0) + row.amount)
+    running = {}
+    for sid, debit in by_debit.items():
+        if debit.void:
+            continue
+        running[sid] = money(debit.remaining + applied.get(sid, 0))
+    lines = []
+    for row in live:
+        debit = by_debit.get(row.debit_id)
+        if debit is None or debit.void or row.debit_id not in running:
+            continue
+        after = money(running[row.debit_id] - row.amount)
+        running[row.debit_id] = after
+        age = invoice_age_days(row.effective_date, debit.invoice_date)
+        overdue = days_overdue(row.effective_date, debit.due_date) if debit.due_date else None
+        lines.append({
+            "credit_id": row.credit_id,
+            "debit_id": row.debit_id,
+            "invoice_number": debit.invoice_number,
+            "amount": row.amount,
+            "evidence": row.evidence,
+            "cash": row.cash,
+            "effective_date": row.effective_date,
+            "invoice_date": debit.invoice_date,
+            "due_date": debit.due_date,
+            "opening": debit.opening,
+            "invoice_amount": money(debit.amount - debit.reversed),
+            "remaining_after": after,
+            "closed": after == 0,
+            "unknown_age": age is None,
+            "invoice_age_days": age,
+            "days_overdue": overdue,
+        })
+    return lines
+
+
+def _posted_items(by_debit, by_credit, open_ids, seen_credits):
+    rows = []
+    for sid in open_ids:
+        debit = by_debit.get(sid)
+        if debit is None:
+            continue
+        rows.append({
+            "source_id": debit.source_id,
+            "side": "debit",
+            "kind": debit.kind,
+            "amount": debit.amount,
+            "reversed": debit.reversed,
+            "effective_date": debit.effective_date,
+            "opening": debit.opening,
+            "cash": False,
+            "void": debit.void,
+        })
+    for sid in seen_credits:
+        credit = by_credit.get(sid)
+        if credit is None:
+            continue
+        rows.append({
+            "source_id": credit.source_id,
+            "side": "credit",
+            "kind": credit.kind,
+            "amount": credit.amount,
+            "reversed": credit.reversed,
+            "effective_date": credit.effective_date,
+            "opening": credit.opening,
+            "cash": credit.cash,
+            "void": credit.void,
         })
     return rows
 
