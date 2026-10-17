@@ -798,12 +798,38 @@ def settle(
         "customer_id": scope[2],
         "currency": scope[3],
         "allocations": alloc_out,
+        "receipts": _standing_receipts(by_credit, seen_credits, live_allocations),
         "open_debits": open_debits,
         "unused_credits": unused_credits,
         "suggestions": suggestions,
         "exceptions": exceptions,
         "reconciliation": reconciliation,
     }
+
+
+def _standing_receipts(by_credit, seen_credits, live_allocations):
+    """Cash and non-cash credits that still stand, dated on the credit itself."""
+    rows = []
+    for credit in by_credit.values():
+        if credit.source_id not in seen_credits or credit.void:
+            continue
+        standing = money(credit.amount - credit.reversed)
+        if standing is None or standing <= 0:
+            continue
+        labels = []
+        for row in live_allocations(credit_id=credit.source_id):
+            if row.evidence and row.evidence not in labels:
+                labels.append(row.evidence)
+        if credit.remaining > 0 and "unapplied" not in labels:
+            labels.append("unapplied")
+        rows.append({
+            "source_id": credit.source_id,
+            "amount": standing,
+            "effective_date": credit.effective_date,
+            "cash": credit.cash,
+            "evidence": labels,
+        })
+    return rows
 
 
 def public_result(result):

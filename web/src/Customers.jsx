@@ -509,46 +509,244 @@ function ActivityTable({ rows, shown, canSales, onOpenInvoice }) {
   );
 }
 
-function readableId(value) {
-  const parts = String(value || "").split("\u001f").map((part) => part.trim()).filter(Boolean);
-  return parts.length ? parts.join(" · ") : "—";
+const DAY_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+function dayLabel(value) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(value || ""));
+  if (!match) return "—";
+  return match[3] + " " + DAY_MONTHS[Number(match[2]) - 1] + " " + match[1];
+}
+
+function settlementLabel(value) {
+  if (value === "source_confirmed") return "Source confirmed";
+  if (value === "manually_confirmed") return "Manually confirmed";
+  if (value === "inferred") return "Inferred";
+  if (value === "mixed") return "Mixed";
+  if (value === "unapplied") return "Unapplied";
+  return value || "—";
+}
+
+function EvidencePill({ value }) {
+  const kind = value === "inferred" || value === "mixed" ? "warn" : (value === "source_confirmed" || value === "manually_confirmed" ? "ok" : "");
+  return <span className={"pill" + (kind ? " " + kind : "")}>{settlementLabel(value)}</span>;
+}
+
+function compareRows(a, b, key) {
+  const av = a[key];
+  const bv = b[key];
+  if (typeof av === "number" && typeof bv === "number") return av - bv;
+  return String(av || "").localeCompare(String(bv || ""));
+}
+
+function DenseTable({ columns, rows, empty, rowKey }) {
+  const numeric = columns.filter((column) => column.numeric).map((column) => column.id);
+  const [sort, setSort] = useState(columns[0] ? columns[0].id : "");
+  const [dir, setDir] = useState("desc");
+  function onSort(id) {
+    const next = toggleSort(sort, dir, id, numeric);
+    setSort(next.sort);
+    setDir(next.dir);
+  }
+  const ordered = rows.slice().sort((a, b) => {
+    const cmp = compareRows(a, b, sort);
+    return dir === "desc" ? -cmp : cmp;
+  });
+  return (
+    <div className="table-wrap">
+      <table className="dense list-table compact">
+        <thead>
+          <tr>
+            {columns.map((column) => (
+              <SortTh key={column.id} id={column.id} label={column.label} sort={sort} dir={dir} onSort={onSort} className={column.numeric ? "num" : ""} />
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {ordered.length ? ordered.map((row, index) => (
+            <tr key={rowKey(row, index)}>
+              {columns.map((column) => (
+                <td key={column.id} className={column.numeric ? "num" : ""}>{column.cell(row)}</td>
+              ))}
+            </tr>
+          )) : (
+            <tr><td colSpan={columns.length} className="muted">{empty}</td></tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function PaymentsPanel({ detail }) {
+  const payments = detail.payments;
+  const [view, setView] = useState("all");
+  if (!payments) {
+    return (
+      <div className="card">
+        <h3>Payments</h3>
+        <p className="muted">Cash receipts are summarized when the shared ledger is on.</p>
+      </div>
+    );
+  }
+  const trend = payments.trend || {};
+  const current = trend.current || {};
+  const prior = trend.prior || {};
+  const currentIds = new Set(current.transactions || []);
+  const priorIds = new Set(prior.transactions || []);
+  const rows = (payments.transactions || []).filter((row) => {
+    if (view === "current") return currentIds.has(row.source_id);
+    if (view === "prior") return priorIds.has(row.source_id);
+    return true;
+  }).map((row) => ({
+    ...row,
+    date_label: dayLabel(row.date),
+    what: "Cash receipt",
+    evidence_label: settlementLabel(row.settlement_evidence),
+  }));
+  const notes = (payments.non_cash || []).map((row) => ({
+    ...row,
+    date_label: dayLabel(row.date),
+    what: "Credit note",
+    evidence_label: settlementLabel(row.settlement_evidence),
+  }));
+  const gap = payments.median_gap_days == null ? "Unavailable" : payments.median_gap_days + " days";
+  const columns = [
+    { id: "date", label: "Date", cell: (row) => row.date_label },
+    { id: "what", label: "What", cell: (row) => row.what },
+    { id: "evidence_label", label: "Settlement", cell: (row) => <EvidencePill value={row.settlement_evidence} /> },
+    { id: "amount", label: "Amount", numeric: true, cell: (row) => money(row.amount) },
+  ];
+  return (
+    <div className="card">
+      <h3>Payments</h3>
+      <p className="muted">Cash receipts only. Credit notes are separate and are not payment behavior. Inferred settlement is not confirmed payment timing.</p>
+      <div className="buy-tiles" style={{ marginTop: 12 }}>
+        <div className="card buy-tile">
+          <span className="muted">Cash received</span>
+          <strong>{money(payments.cash_total)}</strong>
+        </div>
+        <div className="card buy-tile">
+          <span className="muted">Occasions</span>
+          <strong>{payments.occasions || 0}</strong>
+        </div>
+        <div className="card buy-tile">
+          <span className="muted">Typical amount</span>
+          <strong>{payments.typical_amount == null ? "Unavailable" : money(payments.typical_amount)}</strong>
+        </div>
+        <div className="card buy-tile">
+          <span className="muted">Median gap</span>
+          <strong>{gap}</strong>
+        </div>
+      </div>
+      <div className="chips" style={{ marginTop: 16 }}>
+        <button type="button" className={view === "all" ? "" : "secondary"} onClick={() => setView("all")}>All receipts</button>
+        <button type="button" className={view === "current" ? "" : "secondary"} onClick={() => setView("current")}>{current.label || "This year"}</button>
+        <button type="button" className={view === "prior" ? "" : "secondary"} onClick={() => setView("prior")} disabled={!trend.available}>{prior.label || "Earlier year"}</button>
+      </div>
+      {trend.available ? (
+        <p className="muted" style={{ marginTop: 12 }}>
+          {current.label}: {money(current.cash_total)} across {current.occasions || 0} receipts.
+          {" "}{prior.label}: {money(prior.cash_total)} across {prior.occasions || 0} receipts.
+          {" "}Change {trend.cash_change_percent == null ? "unavailable" : trend.cash_change_percent + "%"}.
+        </p>
+      ) : (
+        <p className="muted" style={{ marginTop: 12 }}>{trend.reason || "The earlier window is not available."}</p>
+      )}
+      {payments.undated_count ? (
+        <p className="muted">{payments.undated_count} receipts have no date ({money(payments.undated_amount)}). They stay in the total and out of the gap.</p>
+      ) : null}
+      <DenseTable columns={columns} rows={rows} empty="No cash receipts in this period." rowKey={(row) => row.source_id} />
+      {notes.length ? (
+        <>
+          <h4 className="quiet" style={{ marginTop: 16 }}>Credit notes · {money(payments.non_cash_total)}</h4>
+          <DenseTable columns={columns} rows={notes} empty="No credit notes." rowKey={(row) => row.source_id} />
+        </>
+      ) : null}
+    </div>
+  );
 }
 
 function LedgerPanel({ detail }) {
-  const links = detail.ledger_links || [];
-  const unused = detail.unused_credits || [];
+  const links = (detail.ledger_links || []).map((row) => ({
+    ...row,
+    date: String(row.effective_date || "").slice(0, 10),
+    date_label: dayLabel(row.effective_date),
+    what: row.cash ? "Cash receipt" : "Credit note",
+    invoice_label: row.invoice || "Sale",
+    evidence_label: settlementLabel(row.evidence),
+  }));
+  const unused = (detail.unused_credits || []).map((row) => ({
+    ...row,
+    date: String(row.effective_date || "").slice(0, 10),
+    date_label: dayLabel(row.effective_date),
+    what: row.cash ? "Unused cash" : "Unused credit",
+    amount: row.remaining,
+  }));
   const exceptions = detail.ledger_exceptions || [];
+  const applied = links.reduce((sum, row) => sum + (Number(row.amount) || 0), 0);
+  const unusedTotal = unused.reduce((sum, row) => sum + (Number(row.remaining) || 0), 0);
+  const linkColumns = [
+    { id: "date", label: "Date", cell: (row) => row.date_label },
+    { id: "what", label: "What", cell: (row) => row.what },
+    { id: "invoice_label", label: "Invoice", cell: (row) => (
+      row.debit_id && row.invoice ? (
+        <button type="button" className="linkish" onClick={() => hashSet("invoice/" + encodeURIComponent(row.debit_id))}>{row.invoice_label}</button>
+      ) : row.invoice_label
+    ) },
+    { id: "evidence_label", label: "Evidence", cell: (row) => <EvidencePill value={row.evidence} /> },
+    { id: "amount", label: "Amount", numeric: true, cell: (row) => money(row.amount) },
+  ];
+  const unusedColumns = [
+    { id: "date", label: "Date", cell: (row) => row.date_label },
+    { id: "what", label: "What", cell: (row) => row.what },
+    { id: "amount", label: "Amount", numeric: true, cell: (row) => money(row.remaining) },
+  ];
   return (
     <div className="card">
-      <h3>Receipt links</h3>
+      <h3>Ledger</h3>
+      <p className="muted">Receipt-to-invoice links and unused credit. An inferred link is not confirmed payment behavior.</p>
       {detail.balance_exact === false ? <p className="muted">The opening is unknown, so this is not a complete balance.</p> : null}
-      {links.length ? (
-        <table>
-          <thead><tr><th>Credit</th><th>Invoice</th><th>Evidence</th><th className="num">Amount</th></tr></thead>
-          <tbody>
-            {links.map((row) => (
-              <tr key={(row.credit_id || "") + (row.debit_id || "")}>
-                <td>{readableId(row.credit_id)}</td>
-                <td>{row.invoice || row.debit_id || "—"}</td>
-                <td>{row.evidence || "—"}{row.cash ? "" : " · not cash"}</td>
-                <td className="num">{money(row.amount)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      ) : <p className="muted">No receipt has been applied.</p>}
-      <h3>Unused credit</h3>
-      {unused.length ? (
-        <ul>
-          {unused.map((row) => (
-            <li key={row.source_id}>{readableId(row.source_id)} · {money(row.remaining)}{row.cash ? " · cash" : " · not cash"}</li>
-          ))}
-        </ul>
-      ) : <p className="muted">No unused credit.</p>}
+      <div className="buy-tiles" style={{ marginTop: 12 }}>
+        <div className="card buy-tile">
+          <span className="muted">Applied</span>
+          <strong>{money(applied)}</strong>
+        </div>
+        <div className="card buy-tile">
+          <span className="muted">Unused credit</span>
+          <strong>{money(unusedTotal)}</strong>
+        </div>
+        <div className="card buy-tile">
+          <span className="muted">Links</span>
+          <strong>{links.length}</strong>
+        </div>
+      </div>
+      <h4 className="quiet" style={{ marginTop: 16 }}>Applied</h4>
+      <DenseTable
+        columns={linkColumns}
+        rows={links}
+        empty="No receipt has been applied."
+        rowKey={(row) => (row.credit_id || "") + (row.debit_id || "")}
+      />
+      <h4 className="quiet" style={{ marginTop: 16 }}>Unused credit</h4>
+      <DenseTable
+        columns={unusedColumns}
+        rows={unused}
+        empty="No unused credit."
+        rowKey={(row) => row.source_id}
+      />
       {exceptions.length ? (
         <>
-          <h3>Exceptions</h3>
-          <ul>{exceptions.map((row, index) => <li key={row.code + index}>{row.message || row.code}</li>)}</ul>
+          <h4 className="quiet" style={{ marginTop: 16 }}>Exceptions</h4>
+          <div className="table-wrap">
+            <table className="dense list-table compact">
+              <thead><tr><th>Exception</th></tr></thead>
+              <tbody>
+                {exceptions.map((row, index) => (
+                  <tr key={(row.code || "exception") + index}><td>{row.message || row.code}</td></tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </>
       ) : null}
     </div>
@@ -563,7 +761,7 @@ function firstBuyingPeriod(periods, fallback) {
   return BUYING_PERIODS.find((id) => ((periods[id] || {}).items || []).length) || "all";
 }
 
-const CUSTOMER_TABS = ["due", "settlements", "ledger", "ar-mismatch", "sales", "quantity", "years", "buying", "repurchase", "ordering", "order-check", "activity", "follow-up"];
+const CUSTOMER_TABS = ["due", "settlements", "payments", "ledger", "ar-mismatch", "sales", "quantity", "years", "buying", "repurchase", "ordering", "order-check", "activity", "follow-up"];
 
 function customerTabGroups(detail) {
   const open = Number(detail.invoices_waiting) || 0;
@@ -571,6 +769,7 @@ function customerTabGroups(detail) {
     { tabs: [
       { id: "due", label: "Due", count: open > 0 ? open : null },
       { id: "settlements", label: "Settlements" },
+      { id: "payments", label: "Payments" },
       { id: "ledger", label: "Ledger" },
       { id: "ar-mismatch", label: "AR mismatch" },
     ] },
@@ -814,6 +1013,7 @@ function Profile({ detail, runId, canSales, canStock, canEditDueDays, canManage,
       {tab === "settlements" ? (
         sectionPending ? <EmptyCard title="Loading settlements" copy="Reading receipts applied to invoices." /> : <SettlementsPanel detail={view} />
       ) : null}
+      {tab === "payments" ? <PaymentsPanel detail={view} /> : null}
       {tab === "ledger" ? <LedgerPanel detail={view} /> : null}
       {tab === "sales" ? (
         <>

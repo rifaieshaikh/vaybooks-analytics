@@ -2,7 +2,9 @@
 
 Date: 2026-10-17  
 Status: Phases 0–3 are implemented. Customer, group, rep, stock, collection,
-dashboard, and report screens read the shared ledger. Phases 4–7 are open.
+dashboard, and report screens read the shared ledger. Phase 4 has a cash
+payment summary on the customer profile. The rest of Phase 4 and Phases 5–7
+are open.
 
 ## Outcome and scope
 
@@ -302,7 +304,7 @@ across screens and exports; migration, permissions and rollback checks pass.
 
 ## Phase 4 — Explain customer payment behavior
 
-- [ ] Add a payment summary to existing customer profiles: receipt totals, payment
+- [x] Add a payment summary to existing customer profiles: receipt totals, payment
   occasions, median gap, typical amount and comparable-period trends.
 - [ ] Calculate amount-weighted invoice age and days overdue at allocation for
   confirmed links; present inferred allocation timing separately.
@@ -547,3 +549,19 @@ view.
 
 The Customers ledger, Stock opening note, and Create opening check were opened
 in the browser against a local memory store.
+
+## Phase 4 payment summary
+
+Date: 2026-10-17
+
+The customer Payments tab sums cash receipts, counts occasions, and shows the
+median amount and the median gap between dated receipts. The comparison is the
+fiscal year through the cutoff against the same span one year earlier. A credit
+note stays in its own total. A receipt with no date stays in the cash total and
+out of the gap. An earlier window is withheld when movement history does not
+cover it, and an empty earlier window does not become a percent. Each receipt
+lists its settlement evidence, so an inferred allocation is not shown as
+confirmed payment timing.
+
+`tests/test_payments.py` covers those cases. The remaining Phase 4 bullets are
+still open.

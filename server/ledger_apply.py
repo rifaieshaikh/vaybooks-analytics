@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from vay.dates import parse_date
 from vay.ledger import ENGINE_VERSION
+from vay.payments import payment_summary
 from vay.settlement import bucket_key, empty_buckets
 
 from server.ledger_surface import current_assessment
@@ -184,6 +185,12 @@ def project_customer(customer, as_of, bands=None, start_month=None):
         "status": status,
         "ledger_engine": ENGINE_VERSION,
         "result_scope": "operational",
+        "payments": payment_summary(
+            settlement.get("receipts") or [],
+            as_of=as_of_day or as_of,
+            start_month=start_month,
+            coverage=customer.get("coverage") or {},
+        ),
     }
 
 
