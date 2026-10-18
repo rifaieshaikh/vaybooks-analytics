@@ -19,7 +19,7 @@ def _customer(store):
         "uk": "inv-1",
         "source_upload_id": "u1",
         "fields": {
-            "Date": "2024-05-01", "Party Name": "Acme", "Sales Rep": "Ravi",
+            "Date": "2026-05-01", "Party Name": "Acme", "Sales Rep": "Ravi",
             "Net Amount": "100", "Invoice No": "INV-1",
         },
     })
@@ -27,7 +27,7 @@ def _customer(store):
         "type": "receipt",
         "uk": "rct-1",
         "source_upload_id": "u1",
-        "fields": {"Date": "2024-06-01", "Account Name": "Acme", "Amount": "40"},
+        "fields": {"Date": "2026-06-01", "Account Name": "Acme", "Amount": "40"},
     })
     store.upsert_row({
         "type": "arr",
@@ -43,7 +43,8 @@ def test_customer_directory_and_profile_share_the_ledger_balance():
     assert detail["ledger_engine"] == "1"
     assert detail["result_scope"] == "operational"
     assert detail["balance_exact"] is False
-    assert detail["due"] == 60.0
+    assert detail["due"] == 80.0
+    assert detail["balance_issue"] == "mismatch"
     assert detail["ledger_links"][0]["evidence"] == "inferred"
     assert detail["ledger_links"][0]["cash"] is True
     listed = customer_directory_rows(store)["rows"]
@@ -85,14 +86,14 @@ def test_rollback_keeps_a_confirmed_link_and_backup_restores_rows():
 def test_exception_queue_names_the_missing_opening_and_a_new_run_keeps_the_old_one():
     store = get_store()
     _customer(store)
-    queue = list_exceptions(store, "2026-03-31")
+    queue = list_exceptions(store, "2026-10-18")
     assert any(row["code"] == "missing_opening" and row["customer_id"] == "acme" for row in queue["rows"])
     assert queue["rows"][0]["action"]
-    first_id, err = enqueue_run(store, {"core": True}, "2026-03-31", reports=["phase2_quality"])
+    first_id, err = enqueue_run(store, {"core": True}, "2026-10-18", reports=["phase2_quality"])
     assert err == ""
     run_job(store, first_id)
     first = store.get_run(first_id)
-    second_id, err = enqueue_run(store, {"core": True}, "2026-04-30", reports=["phase2_quality"])
+    second_id, err = enqueue_run(store, {"core": True}, "2026-10-31", reports=["phase2_quality"])
     assert err == ""
     assert store.get_run(first_id)["opening_assessment"] == first["opening_assessment"]
-    assert store.get_run(second_id)["opening_assessment"]["as_of"] == "2026-04-30"
+    assert store.get_run(second_id)["opening_assessment"]["as_of"] == "2026-10-31"

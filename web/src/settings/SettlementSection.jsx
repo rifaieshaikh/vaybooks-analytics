@@ -96,14 +96,14 @@ export default function SettlementSection() {
     {
       id: "oldest",
       label: "Oldest to latest",
-      help: "Clears opening balance first, then invoices from oldest to newest. Excess becomes advance.",
-      steps: ["Opening balance", "Oldest → newest invoices", "Advance if anything left"],
+      help: "Due sits on the newest invoices. Collections and returns pay the oldest invoice first. Money left over, or a shortfall against the ARR balance, is a mismatch.",
+      steps: ["Due on newest invoices", "Oldest → newest collections", "Mismatch if it does not tie"],
     },
     {
       id: "specific",
       label: "Specific",
-      help: "Applies to the matching Invoice No first. Any remainder (or no match) uses Oldest to latest.",
-      steps: ["Matching invoice", "Opening then oldest → newest on remainder"],
+      help: "A receipt pays only the sales invoice it names. Any extra stays unsettled. Receipts with no invoice then pay the oldest invoice first.",
+      steps: ["Named invoice", "Extra stays unsettled", "Other receipts oldest → newest"],
     },
   ];
 
@@ -111,8 +111,8 @@ export default function SettlementSection() {
     <div className="card">
       <h2>Collection settlement</h2>
       <p className="muted">
-        How receipts clear balances for settlement aging. Outstanding due is always attributed newest→oldest
-        on invoices still open after settlement.
+        Due is split across the newest invoices. Collections pay the oldest invoice first.
+        If that does not tie to the ARR balance, the account is a mismatch.
       </p>
       {!loaded ? <p className="muted">Loading…</p> : null}
       <div className="settlement-options" role="radiogroup" aria-label="Settlement mode">

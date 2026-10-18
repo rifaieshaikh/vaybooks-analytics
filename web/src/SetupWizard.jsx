@@ -56,6 +56,7 @@ export default function SetupWizard({ user, onGo }) {
             </div>
           ) : null}
           {saved ? <p className="muted">{saved}</p> : null}
+          {check?.forecast_guidance ? <p className="muted">{check.forecast_guidance}</p> : null}
           {(check?.decisions || []).map((row) => <p key={row.type} className="muted">{row.message}</p>)}
           {(check?.templates || []).length ? (
             <p className="muted">Templates: {(check.templates || []).map((row) => row.type + " (" + row.columns.join(", ") + ")").join("; ")}</p>

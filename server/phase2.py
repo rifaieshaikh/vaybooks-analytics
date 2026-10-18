@@ -536,7 +536,14 @@ def onboarding(store, report_date, entered=None):
         {"type": "arr", "columns": ["Account Name", "Group", "Balance"]},
         {"type": "items", "columns": ["Date", "Item Name", "Qty", "Rate"]},
         {"type": "stock", "columns": ["Item Name", "Qty", "P.Price"]},
+        {"type": "customer_opening", "columns": ["Date", "Account Name", "Balance"]},
+        {"type": "stock_opening", "columns": ["Date", "Item Name", "Qty", "Unit"]},
+        {"type": "purchases", "columns": ["Date", "Item Name", "Qty", "Unit"]},
     ]
+    payload["forecast_guidance"] = (
+        "Collection targets and promises work before any recovery forecast. "
+        "Cash shows an expected amount only after completed periods pass the recorded checks."
+    )
     from server.org_policy import get_org_policy
     policy = get_org_policy(store)
     payload["policy"] = {

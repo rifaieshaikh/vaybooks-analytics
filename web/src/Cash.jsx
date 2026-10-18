@@ -4,6 +4,7 @@ import { money } from "./format";
 
 export default function CashPage() {
   const [data, setData] = useState(null);
+  const [forecast, setForecast] = useState(null);
   const [err, setErr] = useState("");
 
   useEffect(() => {
@@ -13,12 +14,18 @@ export default function CashPage() {
     }).catch((ex) => {
       if (!gone) setErr(ex.message || "Could not load cash.");
     });
+    api.recoveryForecast().then((body) => {
+      if (!gone) setForecast(body);
+    }).catch(() => {
+      if (!gone) setForecast(null);
+    });
     return () => { gone = true; };
   }, []);
 
   return (
     <div className="page">
       <h2>Cash</h2>
+      <p className="muted">Weekly promises are the amounts already entered. Expected recovery is a separate check and is left out of those weeks.</p>
       {err ? <p className="err">{err}</p> : null}
       {data?.opening_label ? <p className="warn">{data.opening_label}</p> : null}
       {data && data.opening != null ? (
@@ -56,6 +63,37 @@ export default function CashPage() {
           ))}
         </div>
       ) : null}
+      {forecast ? <RecoveryForecast forecast={forecast} /> : null}
+    </div>
+  );
+}
+
+function RecoveryForecast({ forecast }) {
+  const interval = forecast.interval || {};
+  const evidence = forecast.evidence || {};
+  const backtest = forecast.backtest || {};
+  return (
+    <div className="card">
+      <h3>Expected recovery · {forecast.horizon_days} days</h3>
+      <p className="muted">{forecast.method_label}</p>
+      {forecast.released ? (
+        <p>Expected cash {money(forecast.expected_cash)} · range {money(interval.low)} to {money(interval.high)}</p>
+      ) : (
+        <p>{forecast.reason}</p>
+      )}
+      <p className="muted">
+        Completed periods used {evidence.closed_periods ?? 0} of {evidence.required_periods ?? 0} required.
+        Backtest origins {backtest.origins ?? 0} of {backtest.required_origins ?? 0}.
+        {backtest.bias_ratio == null ? "" : " Bias " + backtest.bias_ratio + "."}
+        {backtest.interval_coverage == null ? "" : " Interval coverage " + backtest.interval_coverage + "."}
+      </p>
+      {(forecast.assumptions || []).map((line) => <p key={line} className="muted">{line}</p>)}
+      {(forecast.exclusions || []).map((line) => <p key={line} className="warn">{line}</p>)}
+      {(forecast.segments || []).map((row) => (
+        <p key={row.segment} className="muted">
+          {row.segment}: {row.released ? money(row.expected_cash) : (row.reason || "Withheld")}
+        </p>
+      ))}
     </div>
   );
 }

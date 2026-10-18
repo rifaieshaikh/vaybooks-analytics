@@ -8,6 +8,7 @@ const ENTRY_TYPES = [
   ["contact", "Contact"],
   ["promise", "Promise"],
   ["dispute", "Dispute"],
+  ["target", "Target"],
 ];
 
 const CHANNELS = [
@@ -23,7 +24,12 @@ const STATUS_LABEL = {
   partial: "Partial",
   kept: "Kept",
   missed: "Missed",
-  pending_refresh: "Pending refresh",
+  pending_refresh: "Awaiting data",
+  kept_on_time: "Kept on time",
+  kept_late: "Kept late",
+  cancelled: "Cancelled",
+  superseded: "Superseded",
+  non_cash: "Credit note",
   resolved: "Resolved",
 };
 
@@ -101,7 +107,7 @@ function splitInvoiceRefs(refs, lines) {
 
 function entryTitle(mode, kind) {
   const verb = mode === "edit" ? "Edit" : "Add";
-  const noun = kind === "promise" ? "promise" : kind === "dispute" ? "dispute" : "contact";
+  const noun = kind === "promise" ? "promise" : kind === "dispute" ? "dispute" : kind === "target" ? "target" : "contact";
   return verb + " " + noun;
 }
 
@@ -150,6 +156,9 @@ export default function CollectionFollowUp({ customerName, customerUk, invoices,
   const [dispute, setDispute] = useState({ note: "", promise_id: "" });
   const [disputeInvoices, setDisputeInvoices] = useState([]);
   const [disputeOther, setDisputeOther] = useState("");
+  const [target, setTarget] = useState({ assigned_amount: "", period_start: "", period_end: "", next_step: "" });
+  const [targetInvoices, setTargetInvoices] = useState([]);
+  const [targetOther, setTargetOther] = useState("");
   const [openInvoices, setOpenInvoices] = useState([]);
   const [preview, setPreview] = useState(false);
   const [payAmounts, setPayAmounts] = useState({});
@@ -186,6 +195,9 @@ export default function CollectionFollowUp({ customerName, customerUk, invoices,
     setDispute({ note: "", promise_id: "" });
     setDisputeInvoices([]);
     setDisputeOther("");
+    setTarget({ assigned_amount: "", period_start: "", period_end: "", next_step: "" });
+    setTargetInvoices([]);
+    setTargetOther("");
   }
 
   function assignInvoiceRefs(kind, refs, lines) {
@@ -193,6 +205,9 @@ export default function CollectionFollowUp({ customerName, customerUk, invoices,
     if (kind === "promise") {
       setPromiseInvoices(split.selected);
       setPromiseOther(split.other);
+    } else if (kind === "target") {
+      setTargetInvoices(split.selected);
+      setTargetOther(split.other);
     } else if (kind === "dispute") {
       setDisputeInvoices(split.selected);
       setDisputeOther(split.other);
@@ -224,7 +239,7 @@ export default function CollectionFollowUp({ customerName, customerUk, invoices,
     const kind = row ? item.kind : "contact";
     setEditing(row ? row.id : null);
     setEntryType(kind);
-    setByName((row && (row.staff || row.created_by)) || user?.username || "");
+    setByName((row && (row.owner || row.staff || row.created_by)) || user?.username || "");
     clearEntryFields();
     if (kind === "contact" && row) {
       setContact({
@@ -238,10 +253,17 @@ export default function CollectionFollowUp({ customerName, customerUk, invoices,
       setPromise({ amount: row.amount ?? "", promised_on: row.promised_on || "" });
     } else if (kind === "dispute" && row) {
       setDispute({ note: row.note || "", promise_id: row.promise_id || "" });
+    } else if (kind === "target" && row) {
+      setTarget({
+        assigned_amount: row.assigned_amount ?? "",
+        period_start: row.period_start || "",
+        period_end: row.period_end || "",
+        next_step: row.next_step || "",
+      });
     }
     setComposer(mode);
     api.actions().then((payload) => setOwners(payload.owners || [])).catch(() => setOwners([]));
-    loadOpenInvoices(kind, row ? (row.invoice_refs || []) : null);
+    loadOpenInvoices(kind, row ? (row.invoice_refs || row.debt_ids || []) : null);
   }
 
   function chooseType(kind) {
@@ -252,10 +274,9 @@ export default function CollectionFollowUp({ customerName, customerUk, invoices,
 
   async function saveEntry(event) {
     event.preventDefault();
-    const refs = invoiceRefs(
-      entryType === "promise" ? promiseInvoices : disputeInvoices,
-      entryType === "promise" ? promiseOther : disputeOther,
-    );
+    const selectedInvoices = entryType === "promise" ? promiseInvoices : entryType === "target" ? targetInvoices : disputeInvoices;
+    const otherInvoices = entryType === "promise" ? promiseOther : entryType === "target" ? targetOther : disputeOther;
+    const refs = invoiceRefs(selectedInvoices, otherInvoices);
     let ok = false;
     if (composer === "edit") {
       if (entryType === "contact") {
@@ -266,6 +287,11 @@ export default function CollectionFollowUp({ customerName, customerUk, invoices,
           amount: Number(promise.amount),
           promised_on: promise.promised_on,
           invoice_refs: refs,
+        }));
+      } else if (entryType === "target") {
+        ok = await run(() => api.updateCollectionTarget(editing, {
+          owner: byName,
+          next_step: target.next_step,
         }));
       } else {
         ok = await run(() => api.updateCollectionDispute(editing, {
@@ -281,6 +307,21 @@ export default function CollectionFollowUp({ customerName, customerUk, invoices,
         action_id: actionId || "",
         staff: byName,
         ...contact,
+      }));
+    } else if (entryType === "target") {
+      const debts = refs.map((invoice) => {
+        const line = openInvoices.find((item) => item.invoice.toLowerCase() === invoice.toLowerCase());
+        const due = line && Number(line.due) > 0 ? Number(line.due) : Number(target.assigned_amount);
+        return { id: invoice, remaining: due, overdue: true };
+      });
+      ok = await run(() => api.createCollectionTarget({
+        customer_name: customerName,
+        owner: byName,
+        period_start: target.period_start,
+        period_end: target.period_end,
+        assigned_amount: Number(target.assigned_amount),
+        debts: debts.length ? debts : [{ id: customerName, remaining: Number(target.assigned_amount), overdue: true }],
+        next_step: target.next_step,
       }));
     } else if (entryType === "promise") {
       ok = await run(() => api.createCollectionPromise({
@@ -316,10 +357,12 @@ export default function CollectionFollowUp({ customerName, customerUk, invoices,
   const contacts = data?.contacts || [];
   const promises = data?.promises || [];
   const disputes = data?.disputes || [];
+  const targets = data?.targets || [];
   const rows = [
     ...contacts.map((row) => ({ kind: "contact", row })),
     ...promises.map((row) => ({ kind: "promise", row })),
     ...disputes.map((row) => ({ kind: "dispute", row })),
+    ...targets.map((row) => ({ kind: "target", row })),
   ].sort((a, b) => (b.row.created_at || "").localeCompare(a.row.created_at || ""));
 
   return (
@@ -331,7 +374,23 @@ export default function CollectionFollowUp({ customerName, customerUk, invoices,
           <button type="button" onClick={() => openComposer("add")}>Add</button>
         ) : null}
       </div>
-      <p className="muted">Recording a call does not mark an invoice paid.</p>
+      <p className="muted">Recording a call does not mark an invoice paid. Closing a task does not change a promise.</p>
+      {data?.pools ? (
+        <div className="buy-tiles">
+          <div className="buy-tile"><span>Overdue</span><strong>{money(data.pools.overdue)}</strong></div>
+          <div className="buy-tile"><span>Actionable</span><strong>{money(data.pools.actionable)}</strong></div>
+          <div className="buy-tile"><span>Assigned</span><strong>{money(data.assigned_targets)}</strong></div>
+          <div className="buy-tile"><span>Promises left</span><strong>{money(data.remaining_promises)}</strong></div>
+          <div className="buy-tile"><span>Disputed</span><strong>{money(data.pools.disputed)}</strong></div>
+          <div className="buy-tile"><span>Unknown age</span><strong>{money(data.pools.unknown_age)}</strong></div>
+          <div className="buy-tile"><span>Restricted credit</span><strong>{money(data.pools.restricted_credit)}</strong></div>
+          <div className="buy-tile"><span>Actual cash</span><strong>{money(data.actual_cash)}</strong></div>
+          <div className="buy-tile"><span>Target-linked cash</span><strong>{money(data.target_linked_cash)}</strong></div>
+          <div className="buy-tile"><span>Non-cash</span><strong>{money(data.non_cash_resolutions)}</strong></div>
+        </div>
+      ) : null}
+      {data?.cash_note ? <p className="muted">{data.cash_note}</p> : null}
+      {data?.forecast_note ? <p className="muted">{data.forecast_note}</p> : null}
       {composer ? createPortal(
         <div className="modal-backdrop follow-composer" onClick={() => { if (!busy) setComposer(""); }}>
           <form
@@ -418,6 +477,37 @@ export default function CollectionFollowUp({ customerName, customerUk, invoices,
                   />
                 </>
               ) : null}
+              {entryType === "target" ? (
+                <>
+                  <label>
+                    Assigned amount
+                    <input type="number" min="0.01" step="0.01" value={target.assigned_amount} onChange={(e) => setTarget({ ...target, assigned_amount: e.target.value })} required={composer !== "edit"} disabled={composer === "edit"} />
+                  </label>
+                  <label>
+                    Next step
+                    <input value={target.next_step} onChange={(e) => setTarget({ ...target, next_step: e.target.value })} />
+                  </label>
+                  <label>
+                    Period start
+                    <input type="date" value={target.period_start} onChange={(e) => setTarget({ ...target, period_start: e.target.value })} required={composer !== "edit"} disabled={composer === "edit"} />
+                  </label>
+                  <label>
+                    Period end
+                    <input type="date" value={target.period_end} onChange={(e) => setTarget({ ...target, period_end: e.target.value })} required={composer !== "edit"} disabled={composer === "edit"} />
+                  </label>
+                  {composer === "edit" ? <p className="muted span-2">The baseline stays fixed. Changing the owner does not change what has been collected.</p> : (
+                    <InvoiceField
+                      lines={openInvoices}
+                      selected={targetInvoices}
+                      other={targetOther}
+                      onToggle={(invoice) => setTargetInvoices((current) => (
+                        current.includes(invoice) ? current.filter((item) => item !== invoice) : [...current, invoice]
+                      ))}
+                      onOther={setTargetOther}
+                    />
+                  )}
+                </>
+              ) : null}
               {entryType === "dispute" ? (
                 <>
                   <label className="span-2">
@@ -470,7 +560,7 @@ export default function CollectionFollowUp({ customerName, customerUk, invoices,
                 {rows.length ? rows.map((item) => (
                   <tr key={item.kind + item.row.id}>
                     <td>{recordedAt(item.row.created_at)}</td>
-                    <td>{item.kind === "contact" ? "Contact" : item.kind === "promise" ? "Promise" : "Dispute"}</td>
+                    <td>{item.kind === "contact" ? "Contact" : item.kind === "promise" ? "Promise" : item.kind === "target" ? "Target" : "Dispute"}</td>
                     <td>
                       {item.kind === "contact" ? (
                         <>
@@ -537,6 +627,14 @@ export default function CollectionFollowUp({ customerName, customerUk, invoices,
                           ))}
                         </>
                       ) : null}
+                      {item.kind === "target" ? (
+                        <>
+                          <div>{money(item.row.assigned_amount)} assigned · baseline {money(item.row.baseline_amount)} · {item.row.period_start} to {item.row.period_end} · {item.row.owner}</div>
+                          <div className="muted">{money(item.row.remaining)} remaining · cash {money(item.row.cash_applied)} · credit notes {money(item.row.non_cash_applied)}</div>
+                          {item.row.next_step ? <div className="muted">Next: {item.row.next_step}</div> : null}
+                          {canManage && item.row.status === "open" ? <button type="button" className="ghost" onClick={() => openComposer("edit", item)}>Edit</button> : null}
+                        </>
+                      ) : null}
                       {item.kind === "dispute" ? (
                         <div>
                           {item.row.note}{item.row.opened_on ? " · Opened " + item.row.opened_on : ""} · By {item.row.staff || item.row.created_by || "—"}
@@ -550,6 +648,9 @@ export default function CollectionFollowUp({ customerName, customerUk, invoices,
                       ) : null}
                       {item.kind === "promise" ? (
                         <span className={"pill " + tone(item.row.payment_status)}>{statusLabel(item.row.payment_status)}</span>
+                      ) : null}
+                      {item.kind === "target" ? (
+                        <span className="pill">{item.row.status === "open" ? money(item.row.remaining) + " left" : statusLabel(item.row.status)}</span>
                       ) : null}
                       {item.kind === "dispute" ? (
                         <>

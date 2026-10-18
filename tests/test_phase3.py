@@ -288,10 +288,14 @@ def test_missed_promise_requires_current_receipt_coverage():
     get_store().insert_upload({"type": "stock", "filename": "stock.xlsx", "dry_run": False})
     still = c.get("/api/collection", params={"customer": "Acme"}).json()["promises"][0]
     assert still["payment_status"] == "pending_refresh"
-    get_store().insert_import_job({
-        "status": "succeeded",
-        "dry_run": False,
-        "types": {"receipt": {"added": 0}},
+    get_store().upsert_row({
+        "type": "customer_opening",
+        "uk": "coverage-acme",
+        "fields": {
+            "Account Name": "Acme",
+            "Kind": "coverage",
+            "Complete Through": "2020-01-31",
+        },
     })
     missed = c.get("/api/collection", params={"customer": "Acme"}).json()["promises"][0]
     assert missed["payment_status"] == "missed"

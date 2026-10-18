@@ -18,6 +18,7 @@ from server.customers import (
     _iso,
     _fy_month,
     _opening_from_invoices,
+    _party_opening_amount,
     _status_id,
     _status_label,
     account_uk,
@@ -397,7 +398,8 @@ def get_rep(store, uk):
         for member in members:
             name_l = (member.get("name") or "").lower()
             invoices = _group_sales_invoices(full["sales_by_party"].get(name_l) or [], start_month=sm)
-            opening_dt = _opening_from_invoices(invoices, as_of, sm)
+            opening_dt = fy_start
+            brought_forward = _party_opening_amount(full, member.get("name") or "")
             receipt_list = []
             for row in full.get("receipts_by_party", {}).get(name_l) or []:
                 fields = row.get("fields") or {}
@@ -437,6 +439,8 @@ def get_rep(store, uk):
                 receipts=receipt_list,
                 bands=bands,
                 credits=credit_list,
+                fy_start=fy_start,
+                opening_amount=brought_forward,
             )
             invoices_waiting += len(open_lines)
             for line in open_lines:
@@ -447,6 +451,7 @@ def get_rep(store, uk):
             _col, allocs, credit, _rem, _op = allocate_collections(
                 invoices, receipt_list, as_of, opening_dt=opening_dt, mode=mode,
                 due=member.get("due") or 0, bands=bands, credits=credit_list,
+                fy_start=fy_start, opening_amount=brought_forward,
             )
             for alloc in allocs:
                 alloc["party"] = member.get("name") or ""

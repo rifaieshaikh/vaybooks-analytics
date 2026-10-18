@@ -7,12 +7,14 @@ import zipfile
 os.environ.setdefault("VAY_STORE", "memory")
 os.environ.setdefault("VAY_SYNC_JOBS", "1")
 
+from types import SimpleNamespace
+
 from fastapi.testclient import TestClient
 from openpyxl import Workbook
 
 from server.main import app
 from server.settings import mongo_uri
-from server.store import get_store, reset_store_for_tests
+from server.store import MongoStore, get_store, reset_store_for_tests
 from vay.engine import hash_password
 
 
@@ -493,13 +495,13 @@ def test_customer_opening_and_fy_sales_collection():
     uk = c.get("/api/customers").json()["customers"][0]["uk"]
     detail = c.get("/api/customers/%s" % uk).json()
     assert detail["balance_exact"] is False
-    assert detail["due"] == 210
+    assert detail["due"] == 1000
+    assert detail["balance_issue"] == "mismatch"
+    assert [round(x["due"]) for x in detail["open_invoices"] if x["kind"] == "sale"] == [100, 200]
     assert not any(x["kind"] == "opening" for x in detail["open_invoices"])
     ledger = detail["ar_mismatch"]
-    assert ledger["opening"] == 0
+    assert ledger["opening"] == 210
     assert ledger["balance"] == 210
-    sales_open = [x for x in detail["open_invoices"] if x["kind"] == "sale"]
-    assert [round(x["due"]) for x in sales_open] == [110, 100]
     labels = {y["label"]: y for y in detail["fy_years"]}
     assert "FY 2025-26" in labels or "FY 2024-25" in labels
     fy25 = next(y for y in detail["fy_years"] if y["start"].startswith("2025-04-01"))
@@ -520,8 +522,8 @@ def test_customer_lifo_open_invoices_and_shared_status():
     c.put("/api/mappers/sales", json={"column_map": {}, "unique_key": ["Date", "Party Name", "Sales Rep", "Net Amount", "Invoice No"]})
     arr = xlsx_bytes([("arr", ["Account Name", "Group", "Balance"], [["Acme", "South", 150]])])
     sales = xlsx_bytes([("sales", ["Date", "Party Name", "Sales Rep", "Net Amount", "Invoice No"], [
-        ["15-06-24", "Acme", "R", 200, "INV-OLD"],
-        ["15-06-25", "Acme", "R", 100, "INV-NEW"],
+        ["15-05-26", "Acme", "R", 200, "INV-OLD"],
+        ["15-08-26", "Acme", "R", 100, "INV-NEW"],
     ])])
     c.post("/api/uploads", data={"type": "arr"}, files={"file": ("a.xlsx", arr, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
     c.post("/api/uploads", data={"type": "sales"}, files={"file": ("s.xlsx", sales, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
@@ -529,9 +531,9 @@ def test_customer_lifo_open_invoices_and_shared_status():
     uk = listed["customers"][0]["uk"]
     detail = c.get("/api/customers/%s" % uk).json()
     opens = detail["open_invoices"]
-    assert [x["invoice"] for x in opens] == ["INV-OLD", "INV-NEW"]
-    assert opens[0]["due"] == 200
-    assert opens[1]["due"] == 100
+    assert [x["invoice"] for x in opens] == ["INV-NEW", "INV-OLD"]
+    assert opens[0]["due"] == 100
+    assert opens[1]["due"] == 50
     assert opens[0]["invoice_id"]
     assert not any(x["kind"] == "opening" for x in opens)
     sales_events = [e for e in detail["activity"] if e["kind"] == "sale"]
@@ -562,16 +564,16 @@ def test_customer_due_always_lifo_latest_mode_migrates():
     c.put("/api/mappers/sales", json={"column_map": {}, "unique_key": ["Date", "Party Name", "Sales Rep", "Net Amount", "Invoice No"]})
     arr = xlsx_bytes([("arr", ["Account Name", "Group", "Balance"], [["Acme", "South", 150]])])
     sales = xlsx_bytes([("sales", ["Date", "Party Name", "Sales Rep", "Net Amount", "Invoice No"], [
-        ["15-06-24", "Acme", "R", 200, "INV-OLD"],
-        ["15-06-25", "Acme", "R", 100, "INV-NEW"],
+        ["15-05-26", "Acme", "R", 200, "INV-OLD"],
+        ["15-08-26", "Acme", "R", 100, "INV-NEW"],
     ])])
     c.post("/api/uploads", data={"type": "arr"}, files={"file": ("a.xlsx", arr, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
     c.post("/api/uploads", data={"type": "sales"}, files={"file": ("s.xlsx", sales, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
     detail = c.get("/api/customers/%s" % c.get("/api/customers").json()["customers"][0]["uk"]).json()
     opens = detail["open_invoices"]
-    assert [x["invoice"] for x in opens] == ["INV-OLD", "INV-NEW"]
-    assert opens[0]["due"] == 200
-    assert opens[1]["due"] == 100
+    assert [x["invoice"] for x in opens] == ["INV-NEW", "INV-OLD"]
+    assert opens[0]["due"] == 100
+    assert opens[1]["due"] == 50
     c.post("/api/settings/settlement", json={"mode": "oldest"})
 
 
@@ -619,8 +621,8 @@ def test_customer_list_and_statement_use_configured_bands():
     c.put("/api/mappers/sales", json={"column_map": {}, "unique_key": ["Date", "Party Name", "Sales Rep", "Net Amount", "Invoice No"]})
     arr = xlsx_bytes([("arr", ["Account Name", "Group", "Balance"], [["Acme", "South", 150]])])
     sales = xlsx_bytes([("sales", ["Date", "Party Name", "Sales Rep", "Net Amount", "Invoice No"], [
-        ["15-06-24", "Acme", "R", 200, "INV-OLD"],
-        ["15-06-25", "Acme", "R", 100, "INV-NEW"],
+        ["15-05-26", "Acme", "R", 200, "INV-OLD"],
+        ["15-08-26", "Acme", "R", 100, "INV-NEW"],
     ])])
     c.post("/api/uploads", data={"type": "arr"}, files={"file": ("a.xlsx", arr, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
     c.post("/api/uploads", data={"type": "sales"}, files={"file": ("s.xlsx", sales, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
@@ -858,8 +860,8 @@ def test_customer_fifo_last_order_then_partial_and_opening():
     c.put("/api/mappers/sales", json={"column_map": {}, "unique_key": ["Date", "Party Name", "Sales Rep", "Net Amount", "Invoice No"]})
     arr = xlsx_bytes([("arr", ["Account Name", "Group", "Balance"], [["Acme", "South", 20000]])])
     sales = xlsx_bytes([("sales", ["Date", "Party Name", "Sales Rep", "Net Amount", "Invoice No"], [
-        ["01-08-25", "Acme", "R", 8000, "INV-PREV"],
-        ["01-09-25", "Acme", "R", 9000, "INV-LAST"],
+        ["01-06-26", "Acme", "R", 8000, "INV-PREV"],
+        ["01-08-26", "Acme", "R", 9000, "INV-LAST"],
     ])])
     c.post("/api/uploads", data={"type": "arr"}, files={"file": ("a.xlsx", arr, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
     c.post("/api/uploads", data={"type": "sales"}, files={"file": ("s.xlsx", sales, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
@@ -868,7 +870,8 @@ def test_customer_fifo_last_order_then_partial_and_opening():
     by_inv = {x["invoice"]: x for x in opens if x["kind"] == "sale"}
     assert by_inv["INV-LAST"]["due"] == 9000
     assert by_inv["INV-PREV"]["due"] == 8000
-    assert detail["due"] == 17000
+    assert detail["due"] == 20000
+    assert detail["balance_issue"] == "mismatch"
     assert detail["balance_exact"] is False
     assert not any(x["kind"] == "opening" for x in opens)
 
@@ -888,7 +891,7 @@ def test_customer_zero_due_stays_on_track():
     c = client()
     c.put("/api/mappers/arr", json={"column_map": {}, "unique_key": ["Account Name"]})
     arr = xlsx_bytes([("arr", ["Account Name", "Group", "Balance", "Days"], [["Acme", "South", 0, 90]])])
-    sales = xlsx_bytes([("sales", ["Date", "Party Name", "Sales Rep", "Net Amount"], [["15-06-24", "Acme", "R", 40]])])
+    sales = xlsx_bytes([("sales", ["Date", "Party Name", "Sales Rep", "Net Amount"], [["15-06-26", "Acme", "R", 40]])])
     c.post("/api/uploads", data={"type": "arr"}, files={"file": ("a.xlsx", arr, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
     c.post("/api/uploads", data={"type": "sales"}, files={"file": ("s.xlsx", sales, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
     listed = c.get("/api/customers").json()["customers"][0]
@@ -1130,7 +1133,7 @@ def test_invoice_tax_from_file_not_calculated():
 
 def test_sales_import_creates_customer_without_overwriting_due():
     c = client()
-    sales = xlsx_bytes([("sales", ["Date", "Party Name", "Sales Rep", "Net Amount"], [["19-09-24", "NewCo", "R", 40]])])
+    sales = xlsx_bytes([("sales", ["Date", "Party Name", "Sales Rep", "Net Amount"], [["19-09-26", "NewCo", "R", 40]])])
     r = c.post("/api/uploads", data={"type": "sales"}, files={"file": ("s.xlsx", sales, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
     assert r.status_code == 200
     assert r.json()["types"]["sales"]["customers_created"] == 1
@@ -1145,7 +1148,7 @@ def test_sales_import_creates_customer_without_overwriting_due():
 
     arr = xlsx_bytes([("arr", ["Account Name", "Group", "Balance"], [["Acme", "South", 500]])])
     c.post("/api/uploads", data={"type": "arr"}, files={"file": ("a.xlsx", arr, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
-    later = xlsx_bytes([("sales", ["Date", "Party Name", "Sales Rep", "Net Amount"], [["20-09-24", "Acme", "R", 10]])])
+    later = xlsx_bytes([("sales", ["Date", "Party Name", "Sales Rep", "Net Amount"], [["20-09-26", "Acme", "R", 10]])])
     r2 = c.post("/api/uploads", data={"type": "sales"}, files={"file": ("s2.xlsx", later, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
     assert r2.json()["types"]["sales"]["customers_created"] == 0
     assert r2.json()["types"]["sales"]["parties_created"] == 0
@@ -2482,6 +2485,41 @@ def test_cleanup_keeps_runs_factory_deletes_runs():
     assert c.get("/api/rows", params={"type": "party"}).json()["total"] == 0
     assert c.get("/api/rows", params={"type": "stock"}).json()["total"] == 0
     assert c.get("/api/settings/settlement").json()["setup_complete"] is False
+
+
+def test_factory_reset_deletes_legacy_mappers_without_a_null_regex():
+    class Mappers:
+        def __init__(self):
+            self.docs = [
+                {"_id": "default\0sales", "org_id": "default", "type": "sales"},
+                {"_id": "arr", "type": "arr"},
+                {"_id": "other\0sales", "org_id": "other", "type": "sales"},
+            ]
+            self.queries = []
+
+        def find(self, query, projection=None):
+            return [dict(doc) for doc in self.docs]
+
+        def delete_many(self, query):
+            self.queries.append(query)
+            before = list(self.docs)
+            if query == {"org_id": "default"}:
+                self.docs = [doc for doc in self.docs if doc.get("org_id") != "default"]
+            elif "$in" in (query.get("_id") or {}):
+                drop = set(query["_id"]["$in"])
+                assert all("\0" not in key for key in drop)
+                self.docs = [doc for doc in self.docs if doc.get("_id") not in drop]
+            else:
+                raise AssertionError(query)
+            return SimpleNamespace(deleted_count=len(before) - len(self.docs))
+
+    mappers = Mappers()
+    store = MongoStore.__new__(MongoStore)
+    store.db = SimpleNamespace(mappers=mappers)
+    deleted = store.delete_all_mappers()
+    assert deleted == 2
+    assert mappers.docs == [{"_id": "other\0sales", "org_id": "other", "type": "sales"}]
+    assert all("$regex" not in str(query) for query in mappers.queries)
 
 
 def test_create_exposes_generate_progress():

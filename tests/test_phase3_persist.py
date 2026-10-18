@@ -27,10 +27,10 @@ def _row(type_name, uk, fields, upload="u1"):
 
 def _books(store):
     store.upsert_row(_row("sales", "inv-1", {
-        "Date": "2024-05-01", "Party Name": "Acme", "Net Amount": "100", "Invoice No": "INV-1",
+        "Date": "2025-05-01", "Party Name": "Acme", "Net Amount": "100", "Invoice No": "INV-1",
     }))
     store.upsert_row(_row("receipt", "rct-1", {
-        "Date": "2024-06-01", "Account Name": "Acme", "Amount": "40",
+        "Date": "2025-06-01", "Account Name": "Acme", "Amount": "40",
     }))
     store.upsert_row(_row("arr", "acme", {"Account Name": "Acme", "Balance": "100"}))
 
@@ -52,7 +52,7 @@ def test_publish_is_idempotent_and_a_later_source_replaces_only_derived_rows():
     assert saved["allocations"][0]["evidence"] == "inferred"
 
     store.upsert_row(_row("sales", "inv-2", {
-        "Date": "2024-07-01", "Party Name": "Acme", "Net Amount": "10", "Invoice No": "INV-2",
+        "Date": "2025-07-01", "Party Name": "Acme", "Net Amount": "10", "Invoice No": "INV-2",
     }, upload="u2"))
     stale = publication(store)
     assert stale["calculation_key"] == first["calculation_key"]

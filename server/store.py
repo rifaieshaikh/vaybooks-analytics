@@ -19,6 +19,20 @@ def now_utc():
     return datetime.utcnow()
 
 
+def legacy_mapper_ids(docs):
+    """Sheet-name ids saved before each mapper was stored under an organization.
+
+    Organization mappers use ``org`` + NUL + sheet name. MongoDB rejects a
+    regular expression that contains that NUL, so callers filter here.
+    """
+    out = []
+    for doc in docs or []:
+        key = doc.get("_id") if isinstance(doc, dict) else None
+        if isinstance(key, str) and "\0" not in key:
+            out.append(key)
+    return out
+
+
 def org_filter(extra=None):
     """Mongo filter for the current organization. Unscoped calls keep ``extra`` only."""
     extra = dict(extra or {})
@@ -673,7 +687,11 @@ class MongoStore:
             out.append(doc)
         if current_org_id() == DEFAULT_ORG:
             seen = {row.get("type") for row in out}
-            for doc in self.db.mappers.find({"_id": {"$not": {"$regex": "\0"}}}):
+            found = list(self.db.mappers.find({}))
+            legacy = set(legacy_mapper_ids(found))
+            for doc in found:
+                if doc.get("_id") not in legacy:
+                    continue
                 doc["type"] = doc.get("type") or doc.get("_id")
                 if doc["type"] not in seen:
                     out.append(doc)
@@ -1169,7 +1187,9 @@ class MongoStore:
         result = self.db.mappers.delete_many(org_filter())
         extra = 0
         if current_org_id() in (None, DEFAULT_ORG):
-            extra = self.db.mappers.delete_many({"_id": {"$not": {"$regex": "\0"}}}).deleted_count
+            legacy = legacy_mapper_ids(self.db.mappers.find({}, {"_id": 1}))
+            if legacy:
+                extra = self.db.mappers.delete_many({"_id": {"$in": legacy}}).deleted_count
         return result.deleted_count + extra
 
     def delete_all_import_jobs(self):

@@ -622,6 +622,7 @@ const WORK_KIND = {
   follow_up: "Follow up",
   missed_promise: "Missed promise",
   pending_refresh: "Promise",
+  target: "Target",
   repurchase: "Repurchase",
   inactive: "Inactive",
   stock: "Stock",
@@ -691,6 +692,17 @@ function TodayPage({ user }) {
           <option value="later">Later</option>
         </select>
       </label>
+      {(data.owner_outcomes || []).length ? (
+        <div className="buy-tiles">
+          {data.owner_outcomes.map((row) => (
+            <div className="buy-tile" key={row.owner || "unassigned"}>
+              <span>{row.owner || "Unassigned"}</span>
+              <strong>{money(row.open_assigned)}</strong>
+              <span className="muted">Baseline {money(row.baseline)} · Reassigned {money(row.superseded)}</span>
+            </div>
+          ))}
+        </div>
+      ) : null}
       {data.message && rows.length ? <p className="warn">{data.message}</p> : null}
       {err ? <p className="err">{err}</p> : null}
       {rows.length ? rows.map((row) => (
@@ -835,9 +847,16 @@ function WeeklyReview({ run, user }) {
           <span>Open {data.results?.open_count || 0}</span>
           <span>Overdue {data.results?.overdue_count || 0}</span>
           <span>Contacts {data.results?.contacts || 0}</span>
-          <span>Kept {data.results?.promises?.kept || 0}</span>
+          <span>Kept on time {data.results?.promises?.kept_on_time || 0}</span>
+          <span>Kept late {data.results?.promises?.kept_late || 0}</span>
           <span>Partial {data.results?.promises?.partial || 0}</span>
           <span>Missed {data.results?.promises?.missed || 0}</span>
+          <span>Cancelled {data.results?.promises?.cancelled || 0}</span>
+          {(data.results?.owner_outcomes || []).map((row) => (
+            <span key={"target-" + (row.owner || "unassigned")}>
+              {row.owner || "Unassigned"} target {money(row.open_assigned)}
+            </span>
+          ))}
           {(data.results?.by_owner || []).map((row) => (
             <span key={row.owner}>{row.owner}: {row.open} open, {row.overdue} overdue</span>
           ))}

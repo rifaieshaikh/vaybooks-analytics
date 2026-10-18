@@ -17,6 +17,7 @@ from server.customers import (
     _iso,
     _fy_month,
     _opening_from_invoices,
+    _party_opening_amount,
     _period_bounds,
     _rank_items,
     _status_id,
@@ -359,7 +360,8 @@ def get_group(store, uk):
         note_rows = (book.get("credit_notes_by_party") or {}).get(name_l, [])
         if rolled is None:
             invoices = _group_sales_invoices(sale_rows, start_month=sm)
-            opening_dt = _opening_from_invoices(invoices, as_of, sm)
+            opening_dt = fy_start
+            brought_forward = _party_opening_amount(book, member.get("name") or "")
             receipt_list = []
             for row in rec_rows:
                 fields = row.get("fields") or {}
@@ -399,10 +401,13 @@ def get_group(store, uk):
                 receipts=receipt_list,
                 bands=bands,
                 credits=credit_list,
+                fy_start=fy_start,
+                opening_amount=brought_forward,
             )
             col_buckets, allocs, credit, _rem, _op = allocate_collections(
                 invoices, receipt_list, as_of, opening_dt=opening_dt, mode=mode,
                 due=member.get("due") or 0, bands=bands, credits=credit_list,
+                fy_start=fy_start, opening_amount=brought_forward,
             )
             for alloc in allocs:
                 alloc["party"] = member.get("name") or ""

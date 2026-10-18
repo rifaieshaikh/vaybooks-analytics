@@ -20,6 +20,9 @@ _TYPES = (
 
 
 def assess_store(store, as_of):
+    from vay.dates import fiscal_year_start, parse_date
+
+    from server.customers import get_settlement_mode
     from server.due_days import get_default_due_days
     from server.org_policy import get_org_policy
 
@@ -28,6 +31,8 @@ def assess_store(store, as_of):
         for row in store.rows_of_type(type_name) or []:
             rows.append(row)
     policy = get_org_policy(store) or {}
+    as_of_day = parse_date(as_of) or as_of
+    fy_start = fiscal_year_start(as_of_day, policy.get("fiscal_year_start_month"))
     return assess_rows(
         rows,
         as_of=as_of,
@@ -36,6 +41,8 @@ def assess_store(store, as_of):
         terms_days=get_default_due_days(store),
         aliases=alias_lookup(store),
         confirmed_links=_load_confirmed_links(store),
+        fy_start=fy_start.strftime("%Y-%m-%d") if fy_start else "",
+        settlement_mode=get_settlement_mode(store),
     )
 
 
@@ -53,7 +60,7 @@ def _load_confirmed_links(store):
     return found
 
 
-def assess_rows(rows, *, as_of, organization_id, currency, terms_days, aliases=None, confirmed_links=None):
+def assess_rows(rows, *, as_of, organization_id, currency, terms_days, aliases=None, confirmed_links=None, fy_start="", settlement_mode="oldest"):
     aliases = aliases or {}
     customers = {}
     items = {}
@@ -69,6 +76,7 @@ def assess_rows(rows, *, as_of, organization_id, currency, terms_days, aliases=N
         if bucket.get("checkpoint_conflict"):
             bucket["checkpoint_net"] = None
             bucket["movements_complete"] = False
+        _fold_fiscal_year(bucket, fy_start, settlement_mode)
         payload.append(bucket)
     _attach_confirmed_links(payload, confirmed_links, currency)
     return assess_books(payload, list(items.values()), as_of=as_of)
@@ -226,6 +234,11 @@ def _take_customer(customers, row, fields, organization_id, currency, terms_days
         if bucket["checkpoint_net"] is not None and bucket["checkpoint_net"] != amount:
             bucket["checkpoint_conflict"] = True
         bucket["checkpoint_net"] = amount
+        opening = _amount(fields, "OB")
+        if opening is None:
+            opening = _amount(fields, "Opening Balance")
+        if opening is not None:
+            bucket["arr_opening"] = opening
         return
     kind = clean_text(fields.get("Kind")).lower()
     day = _day(fields.get("Date"))
@@ -256,6 +269,34 @@ def _take_customer(customers, row, fields, organization_id, currency, terms_days
     })
     if invoice:
         bucket["opening_keys"].append(invoice)
+
+
+def _fold_fiscal_year(bucket, fy_start, settlement_mode):
+    """Receipts pay invoices. A voucher number is not an invoice match.
+
+    Specific mode keeps a receipt number only when it equals one sales invoice.
+    Anything above that invoice stays unsettled. Oldest mode ignores the number
+    and pays the oldest invoice first. Due is not stored as an opening balance.
+    """
+    del fy_start
+    numbers = {}
+    for row in bucket.get("debits") or []:
+        number = str(row.get("invoice_number") or "").strip().lower()
+        if number:
+            numbers[number] = numbers.get(number, 0) + 1
+    specific = str(settlement_mode or "oldest") == "specific"
+    for row in bucket.get("credits") or []:
+        if row.get("kind") not in ("receipt", "credit_note"):
+            continue
+        reference = str(row.get("reference") or "").strip()
+        if not reference:
+            continue
+        hits = numbers.get(reference.lower(), 0)
+        if specific and hits == 1:
+            continue
+        row["reference"] = ""
+    bucket["invoices_before_opening"] = True
+    bucket["reference_fallthrough"] = False
 
 
 def _item(items, fields):

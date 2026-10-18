@@ -137,6 +137,7 @@ def run_summary(doc, perms=None):
     return {
         "id": str(doc.get("_id")),
         "status": doc.get("status"),
+        "demo": bool(doc.get("demo")),
         "message": doc.get("message") or "",
         "packs": doc.get("packs") or {},
         "report_date": doc.get("report_date"),

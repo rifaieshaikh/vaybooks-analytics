@@ -23,12 +23,14 @@ from server.collection import (
     create_contact,
     create_dispute,
     create_promise,
+    create_target,
     customer_follow_up,
     follow_up_queues,
     reminder_context,
     update_contact,
     update_dispute,
     update_promise,
+    update_target,
 )
 from server.org_policy import get_org_policy
 from server.phase2 import build_bundle, open_review_count
@@ -40,6 +42,7 @@ from server.schemas import (
     CollectionContactBody,
     CollectionDisputeBody,
     CollectionPromiseBody,
+    CollectionTargetBody,
     ReorderBody,
 )
 from server.store import get_store
@@ -250,6 +253,24 @@ def api_update_promise(promise_id: str, body: CollectionPromiseBody, user=Depend
         _collection_error(exc)
 
 
+@router.post("/api/collection/targets")
+def api_create_target(body: CollectionTargetBody, user=Depends(require_user)):
+    assert_perm(user, "actions.manage")
+    try:
+        return create_target(get_store(), body.model_dump(), user.get("username") or "")
+    except ValueError as exc:
+        _collection_error(exc)
+
+
+@router.patch("/api/collection/targets/{target_id}")
+def api_update_target(target_id: str, body: CollectionTargetBody, user=Depends(require_user)):
+    assert_perm(user, "actions.manage")
+    try:
+        return update_target(get_store(), target_id, body.model_dump(exclude_unset=True), user.get("username") or "")
+    except ValueError as exc:
+        _collection_error(exc)
+
+
 @router.post("/api/collection/disputes")
 def api_create_dispute(body: CollectionDisputeBody, user=Depends(require_user)):
     assert_perm(user, "actions.manage")
@@ -352,13 +373,36 @@ def api_review_xlsx(request: Request, user=Depends(require_user)):
     )
 
 
-@router.get("/api/cash")
-def api_cash(user=Depends(require_user)):
+def _cash_perm(user):
     perms = set(user.get("permissions") or [])
     if not perms.intersection({"payments.view", "reports.view.scorecard", "actions.manage", "opening_cash.view"}):
         raise HTTPException(403, "Forbidden")
+
+
+@router.get("/api/cash")
+def api_cash(user=Depends(require_user)):
+    _cash_perm(user)
     from server.cash import build_cash
     return build_cash(get_store())
+
+
+@router.get("/api/recovery-forecast")
+def api_recovery_forecast(request: Request, user=Depends(require_user)):
+    _cash_perm(user)
+    raw = request.query_params.get("horizon_days") or "7"
+    try:
+        horizon = int(raw)
+    except ValueError:
+        raise HTTPException(400, "horizon_days must be a number")
+    if horizon < 1 or horizon > 366:
+        raise HTTPException(400, "horizon_days must be between 1 and 366")
+    from server.recovery_forecast import recovery_forecast_view
+    return recovery_forecast_view(
+        get_store(),
+        request.query_params.get("as_of") or "",
+        horizon,
+        request.query_params.get("owner") or "",
+    )
 
 
 def _reorder_payload(store, user, run_id):

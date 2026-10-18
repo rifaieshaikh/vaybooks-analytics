@@ -114,12 +114,12 @@ def test_allocate_open_skips_fully_settled_invoice():
         invoices, 150, as_of, mode="specific", receipts=receipts,
     )
     assert [x["invoice"] for x in lines] == ["OLD"]
-    assert lines[0]["due"] == 150
+    assert lines[0]["due"] == 200
     assert opening == 0
-    assert sum(buckets[k] for k in BUCKET_KEYS) == 150
+    assert sum(buckets[k] for k in BUCKET_KEYS) == 200
 
 
-def test_allocate_collections_oldest_opening_first_then_invoices():
+def test_allocate_collections_oldest_invoices_before_opening():
     as_of = datetime(2025, 9, 19, 12)
     opening = datetime(2025, 4, 1, 12)
     invoices = [
@@ -134,14 +134,15 @@ def test_allocate_collections_oldest_opening_first_then_invoices():
     )
     assert credit == 0
     assert sum(a["amount"] for a in allocs) == 120
-    assert allocs[0]["kind"] == "opening"
-    assert allocs[0]["amount"] == 50
+    assert allocs[0]["kind"] == "sale"
+    assert allocs[0]["invoice"] == "A"
+    assert allocs[0]["amount"] == 100
     assert allocs[1]["kind"] == "sale"
-    assert allocs[1]["invoice"] == "A"
-    assert allocs[1]["amount"] == 70
+    assert allocs[1]["invoice"] == "B"
+    assert allocs[1]["amount"] == 20
     assert abs(sum(buckets.values()) - 120) < 1e-9
-    assert {r["invoice"]: r["remaining"] for r in rem} == {"A": 30.0, "B": 50.0}
-    assert op_left == 0
+    assert {r["invoice"]: r["remaining"] for r in rem} == {"B": 30.0}
+    assert op_left == 50
 
 
 def test_allocate_collections_oldest_no_opening_hits_invoices():
@@ -199,17 +200,16 @@ def test_allocate_collections_specific_match_then_remainder_fifo():
     receipts = [
         {"date": datetime(2025, 9, 10, 12), "amount": 120, "invoice": "B"},
     ]
-    # due=100 → opening = 100+120-180 = 40
-    # Match B: 80, remainder 40 → opening 40
+    # Match B for 80. The extra 40 stays unsettled and is not pushed onto A.
     buckets, allocs, credit, rem, op_left = allocate_collections(
         invoices, receipts, as_of, opening_dt=opening, mode="specific", due=100,
     )
-    assert credit == 0
+    assert credit == 40
+    assert len(allocs) == 1
     assert allocs[0]["invoice"] == "B" and allocs[0]["amount"] == 80
-    assert allocs[1]["kind"] == "opening" and allocs[1]["amount"] == 40
     assert {r["invoice"]: r["remaining"] for r in rem} == {"A": 100.0}
-    assert op_left == 0
-    assert abs(sum(buckets.values()) - 120) < 1e-9
+    assert op_left == 40
+    assert abs(sum(buckets.values()) - 80) < 1e-9
 
 
 def test_allocate_collections_specific_match():
@@ -256,3 +256,41 @@ def test_credit_note_clears_oldest_and_skips_collection_buckets():
     assert sum(buckets.values()) == 0
     assert credit == 50
     assert rem == []
+
+
+def test_oldest_due_is_split_across_the_newest_invoices():
+    as_of = datetime(2026, 10, 18, 12)
+    invoices = [
+        {"date": datetime(2026, 7, 29, 12), "amount": 55805, "invoice": "839"},
+        {"date": datetime(2026, 9, 2, 12), "amount": 89400, "invoice": "1063"},
+        {"date": datetime(2026, 9, 26, 12), "amount": 87125, "invoice": "1246"},
+    ]
+    lines, _buckets, opening, _dt = allocate_open(invoices, 176626, as_of, mode="oldest")
+    assert opening == 0
+    assert [(line["invoice"], line["due"]) for line in lines] == [
+        ("1246", 87125),
+        ("1063", 89400),
+        ("839", 101),
+    ]
+    assert not any(line["kind"] == "opening" for line in lines)
+
+
+def test_specific_overpayment_stays_unsettled():
+    as_of = datetime(2026, 10, 18, 12)
+    fy = datetime(2026, 4, 1, 12)
+    invoices = [
+        {"date": datetime(2026, 4, 13, 12), "amount": 100, "invoice": "91"},
+        {"date": datetime(2026, 6, 6, 12), "amount": 80, "invoice": "448"},
+    ]
+    receipts = [{"date": datetime(2026, 6, 30, 12), "amount": 150, "invoice": "448"}]
+    _b, allocs, credit, rem, _op = allocate_collections(
+        invoices, receipts, as_of, opening_dt=fy, mode="specific",
+    )
+    assert credit == 70
+    assert allocs[0]["invoice"] == "448" and allocs[0]["amount"] == 80
+    assert {row["invoice"]: row["remaining"] for row in rem} == {"91": 100}
+    lines, _buckets, opening, _dt = allocate_open(
+        invoices, 100, as_of, mode="specific", receipts=receipts,
+    )
+    assert opening == 0
+    assert [(line["invoice"], line["due"]) for line in lines] == [("91", 100)]

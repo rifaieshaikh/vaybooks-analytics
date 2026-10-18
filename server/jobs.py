@@ -604,6 +604,8 @@ def _run_job(store, run_id):
                     "effective_dates": up.get("effective_dates") or {},
                     "finished_at": str(up.get("finished_at") or up.get("created_at") or ""),
                 })
+            from vay.metrics import metric_versions
+            from vay.recovery_forecast import FORECAST_VERSION
             policy_public = get_org_policy(store)
             manifest = {
                 "report_date": report_date_s,
@@ -623,6 +625,7 @@ def _run_job(store, run_id):
                     },
                     "metric_ids": ["sales_mtd", "sales_ytd", "ar_balance"],
                     "metrics": metric_versions(),
+                    "recovery_forecast": FORECAST_VERSION,
                 },
                 "eligibility": eligibility,
                 "reconciliation": recon_result,

@@ -103,6 +103,18 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body || {}),
     }),
+  createCollectionTarget: (body) =>
+    req("/api/collection/targets", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body || {}),
+    }),
+  updateCollectionTarget: (id, body) =>
+    req("/api/collection/targets/" + encodeURIComponent(id), {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body || {}),
+    }),
   createCollectionPromise: (body) =>
     req("/api/collection/promises", {
       method: "POST",
@@ -144,6 +156,14 @@ export const api = {
     return req("/api/review" + (qs ? "?" + qs : ""));
   },
   cash: () => req("/api/cash"),
+  recoveryForecast: (params) => {
+    const q = {};
+    Object.entries(params || {}).forEach(([k, v]) => {
+      if (v !== undefined && v !== null && String(v) !== "") q[k] = v;
+    });
+    const qs = new URLSearchParams(q).toString();
+    return req("/api/recovery-forecast" + (qs ? "?" + qs : ""));
+  },
   reorder: (params) => {
     const q = {};
     Object.entries(params || {}).forEach(([k, v]) => {

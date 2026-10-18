@@ -108,6 +108,7 @@ def build_cash(store, as_of=None):
     commitments, uncosted = _commitments(store)
     inflow = {}
     pending = []
+    counted = {}
     weeks = set()
     for day, _amount in openings:
         weeks.add(_week_start(day))
@@ -132,6 +133,24 @@ def build_cash(store, as_of=None):
         week = _week_start(promised)
         weeks.add(week)
         inflow[week] = round(inflow.get(week, 0.0) + remaining, 2)
+        name = (row.get("customer_name") or "").strip().lower()
+        counted[name] = round(counted.get(name, 0.0) + remaining, 2)
+    from server.collection import TARGET_TYPE, _rows, current_target
+    as_of_text = as_of.strftime("%Y-%m-%d")
+    for row in _rows(store, TARGET_TYPE):
+        if not current_target(row, as_of_text):
+            continue
+        remaining = round(float(row.get("remaining") if row.get("remaining") is not None else row.get("assigned_amount") or 0), 2)
+        name = (row.get("customer_name") or "").strip().lower()
+        extra = round(remaining - counted.get(name, 0.0), 2)
+        if extra <= 0.009:
+            continue
+        week = _week_start(_day(row.get("period_end")))
+        if not week:
+            continue
+        weeks.add(week)
+        inflow[week] = round(inflow.get(week, 0.0) + extra, 2)
+        counted[name] = round(counted.get(name, 0.0) + extra, 2)
     payable_sum = {}
     for row in payables:
         payable_sum[row["week"]] = round(payable_sum.get(row["week"], 0.0) + row["amount"], 2)

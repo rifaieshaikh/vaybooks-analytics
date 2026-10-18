@@ -525,13 +525,26 @@ def build_results(store, actions, scope, report_date, run, opens):
     _today, contacts, promises, _disputes = _bundle(store, as_of)
     open_rows = [row for row in scoped if row.get("status") == "open"]
     overdue = [row for row in open_rows if row.get("due_date") and row["due_date"] < as_of]
-    promise_counts = {"kept": 0, "partial": 0, "missed": 0, "pending_refresh": 0, "open": 0}
+    promise_counts = {
+        "kept": 0, "kept_on_time": 0, "kept_late": 0, "partial": 0,
+        "missed": 0, "pending_refresh": 0, "open": 0, "cancelled": 0, "non_cash": 0,
+    }
     for row in promises:
         if not _customer_in_scope(scope, reps, row.get("customer_name")):
             continue
         status = row.get("payment_status") or ""
-        if status in promise_counts:
+        if status in ("kept_on_time", "kept_late"):
             promise_counts[status] += 1
+            promise_counts["kept"] += 1
+        elif status in promise_counts:
+            promise_counts[status] += 1
+    from server.collection import TARGET_TYPE, _rows, current_target
+    from vay.recovery import owner_outcomes
+    visible_targets = [
+        row for row in _rows(store, TARGET_TYPE)
+        if _customer_in_scope(scope, reps, row.get("customer_name"))
+        and (current_target(row, as_of) or str(row.get("status") or "") == "superseded")
+    ]
     contact_count = sum(1 for row in contacts if _customer_in_scope(scope, reps, row.get("customer_name")))
     review_opens = [item for item in opens or [] if item.get("user")]
     latest = ""
@@ -553,6 +566,15 @@ def build_results(store, actions, scope, report_date, run, opens):
         "refreshed_at": str((run or {}).get("finished_at") or ""),
         "rows": [_result_row(row) for row in scoped],
         "by_owner": _results_by_owner(scoped, as_of),
+        "owner_outcomes": [
+            {
+                "owner": row["owner"],
+                "open_assigned": float(row["open_assigned"]),
+                "baseline": float(row["baseline"]),
+                "superseded": float(row["superseded"]),
+            }
+            for row in owner_outcomes(visible_targets)
+        ],
         "recovery": _sales_after_contact(store, contacts),
         "attribution": "Allocated receipts are counted on one task. Received since assigned is observed, not proof that the task caused the payment.",
     }

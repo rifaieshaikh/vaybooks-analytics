@@ -1146,8 +1146,8 @@ export default function ImportPage({ onGo, onQueued, busy: reportBusy, run }) {
             <h3>Set up settlement first</h3>
             <p>
               Before creating reports, save a settlement mode and aging bands in Settings.
-              Outstanding due uses newest→oldest on unsettled invoices; collections use Opening then
-              oldest→newest (or Specific with that remainder).
+              Due sits on the newest invoices. Receipts pay the oldest invoice first.
+              Specific pays only the named invoice, and any extra stays unsettled.
             </p>
             <div className="row gap" style={{ marginTop: 16, justifyContent: "flex-end" }}>
               <button type="button" className="secondary" onClick={() => setSetupGate(null)}>Cancel</button>

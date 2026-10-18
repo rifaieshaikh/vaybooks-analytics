@@ -18,6 +18,7 @@ EMPTY_REPS_MESSAGE = "Ask an admin to assign sales reps."
 _KIND_RANK = {
     "missed_promise": 1,
     "pending_refresh": 2,
+    "target": 2,
     "follow_up": 3,
     "stock": 4,
     "repurchase": 5,
@@ -258,7 +259,27 @@ def _follow_rows(store, scope, directory, reps, today):
         row["owner"] = promise.get("staff") or ""
         _observed(row, promise.get("remaining"))
         rows.append(row)
-    return rows, today
+    for target in queues.get("targets") or []:
+        customer = target.get("customer_name") or ""
+        profile, salesperson = _profile(directory, reps, customer)
+        if not _allowed(scope, salesperson):
+            continue
+        row = _blank(
+            "target",
+            customer,
+            salesperson,
+            target.get("next_step") or "Collect the assigned target",
+            _age(target.get("period_end"), today),
+            today,
+            target.get("id") or customer,
+        )
+        row["credit"] = _credit(profile)
+        row["due_date"] = target.get("period_end") or ""
+        row["owner"] = target.get("owner") or ""
+        row["next_step"] = target.get("next_step") or ""
+        _observed(row, target.get("remaining"))
+        rows.append(row)
+    return rows, queues.get("owner_outcomes") or [], today
 
 
 def _attach_actions(rows, store, scope, directory, reps, today):
@@ -607,7 +628,7 @@ def build_worklist(store, scope, report_date="", kind="", due=""):
         }
     directory = _directory(store)
     reps = _rep_map(store)
-    rows, today = _follow_rows(store, scope, directory, reps, "")
+    rows, owner_outcomes, today = _follow_rows(store, scope, directory, reps, "")
     rows.extend(_repurchase_rows(store, scope, directory, reps, today))
     rows.extend(_inactive_rows(store, scope, directory, reps, report_date, today))
     rows.extend(_stock_rows(store, scope, today))
@@ -627,6 +648,7 @@ def build_worklist(store, scope, report_date="", kind="", due=""):
         "order_rule": ORDER_RULE,
         "message": scope.get("message") or "",
         "rows": rows,
+        "owner_outcomes": owner_outcomes,
         "can_pick_staff": bool(scope.get("can_pick_staff")),
         "staff": scope.get("staff") or "",
         "staff_options": _staff_options(store) if scope.get("can_pick_staff") else [],

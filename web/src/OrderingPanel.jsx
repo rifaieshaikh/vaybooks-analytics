@@ -133,7 +133,7 @@ function downloadCollectionFollowUp(detail, period, view, selectedFy, selectedMo
 
 function FlaggedTable({ rows, showParty }) {
   if (!rows.length) {
-    return <p className="muted" style={{ marginTop: 12 }}>No orders while overdue in this period.</p>;
+    return <p className="muted" style={{ marginTop: 12 }}>No purchases while overdue in this period.</p>;
   }
   return (
     <div className="table-wrap" style={{ marginTop: 12 }}>
@@ -146,6 +146,7 @@ function FlaggedTable({ rows, showParty }) {
             <th className="num">Sale</th>
             <th className="num">Oldest age</th>
             <th className="num">Overdue</th>
+            <th className="num">Exposure before</th>
             <th>Due days</th>
           </tr>
         </thead>
@@ -158,6 +159,7 @@ function FlaggedTable({ rows, showParty }) {
               <td className="num">{money(e.amount)}</td>
               <td className="num">{e.oldest_age != null ? e.oldest_age + "d" : "—"}</td>
               <td className="num">{money(e.overdue_amount)}</td>
+              <td className="num">{e.exposure_available ? money(e.exposure_before) : "Unavailable"}</td>
               <td>{e.due_days != null ? e.due_days + " · " + (e.due_days_source || "") : "—"}</td>
             </tr>
           ))}
@@ -202,7 +204,7 @@ export default function OrderingPanel({ detail, showParty, entity, canEditDueDay
     <div className="card">
       <h3>Ordering</h3>
       <p className="muted">
-        Sales placed while outstanding was older than due days (as of the sale date).
+        Purchases placed while outstanding was older than due days (as of the purchase date). These are sales, not orders. Exposure before each purchase is the ledger balance.
         Using <strong>{detail.due_days != null ? detail.due_days : ordering.due_days || 30}</strong> days
         {" "}· from {sourceLabel}.
       </p>
@@ -220,7 +222,7 @@ export default function OrderingPanel({ detail, showParty, entity, canEditDueDay
         <div className="card buy-tile">
           <span className="muted">Overall sales</span>
           <strong>{money(overall.sales_value || 0)}</strong>
-          <span className="muted">{overall.sales_count || 0} orders</span>
+          <span className="muted">{overall.sales_count || 0} purchases</span>
         </div>
         <div className="card buy-tile">
           <span className="muted">Flagged overall</span>
@@ -276,7 +278,7 @@ export default function OrderingPanel({ detail, showParty, entity, canEditDueDay
       <div style={{ marginTop: 12 }}>
         <div className="card-head" style={{ alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 0 }}>
           <p className="muted" style={{ margin: 0 }}>
-            {period.flagged_count || 0} of {period.sales_count || 0} orders flagged
+            {period.flagged_count || 0} of {period.sales_count || 0} purchases flagged
             {" · "}{money(period.flagged_value || 0)} of {money(period.sales_value || 0)}
             {" · "}{pct(period.flagged_value, period.sales_value)} of value
           </p>
@@ -370,7 +372,7 @@ export function orderingHeroLine(detail) {
   const currentKey = ordering.default_month;
   const month = months.find((m) => m.key === currentKey);
   if (badge.current_month && month && month.flagged_count) {
-    return `${month.flagged_count} orders while overdue this month · ${money(month.flagged_value)}`;
+    return `${month.flagged_count} purchases while overdue this month · ${money(month.flagged_value)}`;
   }
   if (badge.current_fy) {
     const asOf = detail.as_of || "";
@@ -383,7 +385,7 @@ export function orderingHeroLine(detail) {
     }
     if (!fy) fy = byFy.find((y) => (y.flagged_count || 0) > 0) || byFy[0];
     if (fy && fy.flagged_count) {
-      return `${fy.flagged_count} orders while overdue ${fy.label} · ${money(fy.flagged_value)}`;
+      return `${fy.flagged_count} purchases while overdue ${fy.label} · ${money(fy.flagged_value)}`;
     }
   }
   return "";

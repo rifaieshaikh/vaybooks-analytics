@@ -212,6 +212,16 @@ export function OrderCheckResult({ result }) {
         </p>
       ) : null}
 
+      {result.evidence ? <p className="muted">{result.evidence}{result.customer_kind_label ? " · " + result.customer_kind_label : ""}</p> : null}
+      {result.exposure != null ? (
+        <p className="muted">
+          Exposure {money(result.exposure)}
+          {result.exposure_exact ? "" : " · not a complete balance"}
+          {result.headroom != null ? " · headroom " + money(result.headroom) : ""}
+        </p>
+      ) : null}
+      {(result.uncertain || []).length ? <p className="warn">{result.uncertain.join(" ")}</p> : null}
+      {result.cycle_evidence === "insufficient" ? <p className="muted">Not enough covered purchases for a next-purchase date.</p> : null}
       {sig.due_days != null ? (
         <p className="muted order-check-due-line">
           Oldest open <strong>{sig.oldest_open_age != null ? sig.oldest_open_age + "d" : "—"}</strong>

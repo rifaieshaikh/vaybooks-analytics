@@ -15,6 +15,7 @@ CONTACT_TYPE = "collection_contact"
 PROMISE_TYPE = "collection_promise"
 DISPUTE_TYPE = "collection_dispute"
 ALLOCATION_TYPE = "collection_allocation"
+TARGET_TYPE = "collection_target"
 ACTION_TYPE = "action"
 
 CHANNELS = ("phone", "visit", "whatsapp", "email", "other")
@@ -181,41 +182,31 @@ def _source_map(sources):
     return {(row["source_type"], row["uk"]): row for row in sources if row.get("uk")}
 
 
-def _receipt_upload_dates(store):
-    dates = []
-
-    def take(value):
-        text = _iso_date(value)
-        if text:
-            dates.append(text)
-
-    for job in store.list_import_jobs() or []:
-        if job.get("dry_run") or job.get("status") != "succeeded":
+def coverage_through(store, customer_name):
+    """Phase 1 coverage end. An upload date is not coverage."""
+    latest = ""
+    key = _key(customer_name)
+    for doc in store.rows_of_type("customer_opening") or []:
+        fields = doc.get("fields") or {}
+        account = _key(fields.get("Account Name") or fields.get("Party Name") or "")
+        if account and account != key:
             continue
-        types = job.get("types") or {}
-        counts = job.get("row_counts") or {}
-        if "receipt" not in types and "receipt" not in counts:
+        if str(fields.get("Kind") or "").strip().lower() != "coverage":
             continue
-        take(job.get("created_at"))
-        upload_id = job.get("upload_id")
-        if upload_id and hasattr(store, "get_upload"):
-            upload = store.get_upload(str(upload_id))
-            if upload and not upload.get("dry_run"):
-                take(upload.get("created_at"))
-    for upload in store.list_uploads() or []:
-        if upload.get("dry_run"):
-            continue
-        counts = upload.get("row_counts") or {}
-        if upload.get("type") == "receipt" or "receipt" in counts:
-            take(upload.get("created_at"))
-    return dates
+        day = _iso_date(fields.get("Complete Through"))
+        if day and day > latest:
+            latest = day
+    return latest
 
 
 def coverage_current(store, customer_name, promised_on, sources=None):
-    """True when receipt data reaches the promised date."""
+    """True when Phase 1 coverage or a receipt date reaches the promised date."""
     promised = _iso_date(promised_on)
     if not promised:
         return False
+    through = coverage_through(store, customer_name)
+    if through and through >= promised:
+        return True
     key = _key(customer_name)
     latest = ""
     for row in sources if sources is not None else _load_sources(store):
@@ -223,31 +214,47 @@ def coverage_current(store, customer_name, promised_on, sources=None):
             continue
         if row.get("date") and row["date"] > latest:
             latest = row["date"]
-    if latest and latest >= promised:
-        return True
-    for day in _receipt_upload_dates(store):
-        if day >= promised:
-            return True
-    return False
+    return bool(latest and latest >= promised)
 
 
-def payment_state(amount, allocated, promised_on, as_of, current):
-    remaining = round(max(0.0, round(float(amount or 0), 2) - round(float(allocated or 0), 2)), 2)
-    promised = _iso_date(promised_on)
-    today = _iso_date(as_of)
-    if remaining <= 0.009:
-        return {"payment_status": "kept", "remaining": 0.0, "message": ""}
-    if promised and today and promised < today:
-        if current:
-            return {"payment_status": "missed", "remaining": remaining, "message": ""}
-        return {
-            "payment_status": "pending_refresh",
-            "remaining": remaining,
-            "message": PENDING_MESSAGE,
-        }
-    if round(float(allocated or 0), 2) > 0.009:
-        return {"payment_status": "partial", "remaining": remaining, "message": ""}
-    return {"payment_status": "open", "remaining": remaining, "message": ""}
+def payment_state(
+    amount,
+    allocated,
+    promised_on,
+    as_of,
+    current,
+    cash_allocated=None,
+    non_cash_allocated=0,
+    paid_on="",
+    cancelled=False,
+    superseded=False,
+):
+    from vay.recovery import promise_outcome
+
+    cash = allocated if cash_allocated is None else cash_allocated
+    through = promised_on if current else ""
+    outcome = promise_outcome(
+        amount,
+        cash,
+        non_cash_allocated,
+        _iso_date(promised_on),
+        _iso_date(paid_on),
+        _iso_date(as_of),
+        _iso_date(through) if current else "",
+        cancelled=cancelled,
+        superseded=superseded,
+    )
+    status = outcome["payment_status"]
+    message = ""
+    if status == "awaiting_data":
+        status = "pending_refresh"
+        message = PENDING_MESSAGE
+    return {
+        "payment_status": status,
+        "remaining": float(outcome["remaining"]),
+        "message": message,
+        "cash_kept": outcome["cash_kept"],
+    }
 
 
 def _active(alloc):
@@ -482,10 +489,43 @@ def _receipt_coverage(customer_name, sources):
     return latest
 
 
+def _allocation_split(promise_id, allocs, sources):
+    by_source = _source_map(sources)
+    cash = 0.0
+    non_cash = 0.0
+    paid_on = ""
+    for row in allocs:
+        if row.get("promise_id") != promise_id or not _active(row):
+            continue
+        amount = round(float(row.get("amount") or 0), 2)
+        source_type = row.get("source_type") or "receipt"
+        src = by_source.get((source_type, row.get("source_uk") or ""))
+        if source_type == "credit_note" or (src and src.get("source_type") == "credit_note"):
+            non_cash = round(non_cash + amount, 2)
+            continue
+        cash = round(cash + amount, 2)
+        day = (src or {}).get("date") or ""
+        if day > paid_on:
+            paid_on = day
+    return cash, non_cash, paid_on
+
+
 def _promise_view(promise, allocs, sources, store, as_of):
     allocated = _allocated_to(allocs, promise.get("id"))
+    cash, non_cash, paid_on = _allocation_split(promise.get("id"), allocs, sources)
     current = coverage_current(store, promise.get("customer_name"), promise.get("promised_on"), sources)
-    state = payment_state(promise.get("amount"), allocated, promise.get("promised_on"), as_of, current)
+    state = payment_state(
+        promise.get("amount"),
+        allocated,
+        promise.get("promised_on"),
+        as_of,
+        current,
+        cash_allocated=cash,
+        non_cash_allocated=non_cash,
+        paid_on=paid_on,
+        cancelled=promise.get("status") == "cancelled",
+        superseded=promise.get("status") == "superseded",
+    )
     receipt_through = _receipt_coverage(promise.get("customer_name"), sources)
     view = {
         "id": promise.get("id") or "",
@@ -548,9 +588,43 @@ def _dispute_view(row):
     }
 
 
+def refresh_targets(store, sources):
+    """Write each open target's remaining amount from the current receipts."""
+    from vay.recovery import apply_recovery
+
+    targets = _rows(store, TARGET_TYPE)
+    if not targets:
+        return {"actual_cash": 0.0, "target_linked_cash": 0.0, "non_cash_resolutions": 0.0}
+    result = apply_recovery(targets, sources, _rows(store, PROMISE_TYPE), _rows(store, ALLOCATION_TYPE))
+    by_id = {row["id"]: row for row in result["targets"]}
+    for row in targets:
+        fresh = by_id.get(row.get("id") or "")
+        if not fresh or (row.get("status") or "open") != "open":
+            continue
+        remaining = float(fresh["remaining"])
+        cash_applied = float(fresh["cash_applied"])
+        non_cash_applied = float(fresh["non_cash_applied"])
+        changed = (
+            abs(round(float(row.get("remaining") if row.get("remaining") is not None else row.get("assigned_amount") or 0), 2) - remaining) > 0.009
+            or abs(round(float(row.get("cash_applied") or 0), 2) - cash_applied) > 0.009
+            or abs(round(float(row.get("non_cash_applied") or 0), 2) - non_cash_applied) > 0.009
+        )
+        row["remaining"] = remaining
+        row["cash_applied"] = cash_applied
+        row["non_cash_applied"] = non_cash_applied
+        if changed:
+            _save(store, TARGET_TYPE, row["id"], row)
+    return {
+        "actual_cash": float(result["actual_cash"]),
+        "target_linked_cash": float(result["target_linked_cash"]),
+        "non_cash_resolutions": float(result["non_cash_resolutions"]),
+    }
+
+
 def _bundle(store, as_of=None):
     today = _today(as_of, store)
     sources = sync_allocations(store)
+    refresh_targets(store, sources)
     allocs = _rows(store, ALLOCATION_TYPE)
     promises = [
         _promise_view(row, allocs, sources, store, today)
@@ -564,17 +638,123 @@ def _bundle(store, as_of=None):
     return today, contacts, promises, disputes
 
 
+def _target_view(row):
+    return {
+        "id": row.get("id") or "",
+        "customer_name": row.get("customer_name") or "",
+        "owner": row.get("owner") or "",
+        "period_start": row.get("period_start") or "",
+        "period_end": row.get("period_end") or "",
+        "debt_ids": list(row.get("debt_ids") or []),
+        "assigned_amount": round(float(row.get("assigned_amount") or 0), 2),
+        "baseline_amount": round(float(row.get("baseline_amount") or 0), 2),
+        "remaining": round(float(row.get("remaining") if row.get("remaining") is not None else row.get("assigned_amount") or 0), 2),
+        "cash_applied": round(float(row.get("cash_applied") or 0), 2),
+        "non_cash_applied": round(float(row.get("non_cash_applied") or 0), 2),
+        "status": row.get("status") or "open",
+        "supersedes": row.get("supersedes") or "",
+        "next_step": row.get("next_step") or "",
+        "created_by": row.get("created_by") or "",
+        "created_at": row.get("created_at") or "",
+        "updated_by": row.get("updated_by") or "",
+        "updated_at": row.get("updated_at") or "",
+    }
+
+
+def _customer_targets(store, customer_name):
+    key = _key(customer_name)
+    rows = [row for row in _rows(store, TARGET_TYPE) if _key(row.get("customer_name")) == key]
+    rows.sort(key=lambda row: (row.get("created_at") or "", row.get("id") or ""))
+    return [_target_view(row) for row in rows]
+
+
+def current_target(row, as_of):
+    """An open target whose period has not ended still commits the actionable pool."""
+    if str((row or {}).get("status") or "open") != "open":
+        return False
+    end = str((row or {}).get("period_end") or "")[:10]
+    if not end:
+        return True
+    return end >= str(as_of or "")[:10]
+
+
+def _recovery_summary(promises, targets, disputes, as_of):
+    from vay.recovery import assign_targets, cap_commitments, owner_outcomes, recovery_pools
+
+    items = []
+    seen = set()
+    open_disputes = set()
+    for dispute in disputes or []:
+        if (dispute.get("status") or "open") != "open":
+            continue
+        for ref in dispute.get("invoice_refs") or []:
+            open_disputes.add(str(ref).lower())
+    for target in targets or []:
+        if not current_target(target, as_of):
+            continue
+        for debt in target.get("debts") or []:
+            debt_id = str(debt.get("id") or "")
+            if not debt_id or debt_id in seen:
+                continue
+            seen.add(debt_id)
+            item = dict(debt)
+            if debt_id.lower() in open_disputes:
+                item["disputed"] = True
+            items.append(item)
+    pools = recovery_pools(items)
+    current = [row for row in targets or [] if current_target(row, as_of)]
+    assigned = assign_targets(current, pools["actionable"])
+    commitments = cap_commitments(promises, pools["actionable"])
+    outcome_rows = current + [row for row in targets or [] if str(row.get("status") or "") == "superseded"]
+    return {
+        "pools": {key: float(value) if key != "eligibility" else value for key, value in pools.items()},
+        "assigned_targets": float(assigned["assigned"]),
+        "remaining_promises": float(commitments["remaining_promises"]),
+        "owner_outcomes": [
+            {
+                "owner": row["owner"],
+                "open_assigned": float(row["open_assigned"]),
+                "baseline": float(row["baseline"]),
+                "superseded": float(row["superseded"]),
+            }
+            for row in owner_outcomes(outcome_rows)
+        ],
+    }
+
+
 def customer_follow_up(store, customer_name, as_of=None):
     name = clean_text(customer_name)
     if not name:
         raise ValueError("customer_name is required")
-    _today_value, contacts, promises, disputes = _bundle(store, as_of)
+    today, contacts, promises, disputes = _bundle(store, as_of)
     key = _key(name)
+    customer_promises = [row for row in promises if _key(row.get("customer_name")) == key]
+    customer_disputes = [row for row in disputes if _key(row.get("customer_name")) == key]
+    stored_targets = [row for row in _rows(store, TARGET_TYPE) if _key(row.get("customer_name")) == key]
+    summary = _recovery_summary(customer_promises, stored_targets, customer_disputes, today)
+    from vay.recovery import apply_recovery
+    customer_sources = [row for row in _load_sources(store) if _key(row.get("name")) == key]
+    cash = apply_recovery(
+        stored_targets,
+        customer_sources,
+        [row for row in _rows(store, PROMISE_TYPE) if _key(row.get("customer_name")) == key],
+        _rows(store, ALLOCATION_TYPE),
+    )
+    summary["actual_cash"] = float(cash["actual_cash"])
+    summary["target_linked_cash"] = float(cash["target_linked_cash"])
+    summary["non_cash_resolutions"] = float(cash["non_cash_resolutions"])
+    summary["cash_note"] = "Linked cash shares each receipt once. It does not show that the target caused the payment."
+    summary["forecast_note"] = (
+        "Expected recovery is on Cash, and only after completed periods pass the recorded checks. "
+        "This assigned amount stays as entered."
+    )
     return {
         "customer_name": name,
         "contacts": [row for row in contacts if _key(row.get("customer_name")) == key],
-        "promises": [row for row in promises if _key(row.get("customer_name")) == key],
-        "disputes": [row for row in disputes if _key(row.get("customer_name")) == key],
+        "promises": customer_promises,
+        "disputes": customer_disputes,
+        "targets": [_target_view(row) for row in stored_targets],
+        **summary,
     }
 
 
@@ -588,7 +768,10 @@ def follow_up_queues(store, as_of=None):
     missed = [row for row in promises if row.get("payment_status") == "missed"]
     pending = [row for row in promises if row.get("payment_status") == "pending_refresh"]
     from server.org_policy import get_org_policy
+    from vay.recovery import owner_outcomes
     policy = get_org_policy(store)
+    stored_targets = _rows(store, TARGET_TYPE)
+    targets = [_target_view(row) for row in stored_targets if current_target(row, today)]
     return {
         "as_of": today,
         "currency_code": policy.get("currency_code") or "",
@@ -596,14 +779,27 @@ def follow_up_queues(store, as_of=None):
         "due_follow_ups": due,
         "missed_promises": missed,
         "pending_refresh": pending,
+        "targets": [row for row in targets if row.get("status") == "open"],
+        "owner_outcomes": [
+            {
+                "owner": row["owner"],
+                "open_assigned": float(row["open_assigned"]),
+                "baseline": float(row["baseline"]),
+                "superseded": float(row["superseded"]),
+            }
+            for row in owner_outcomes(
+                [row for row in stored_targets if current_target(row, today) or str(row.get("status") or "") == "superseded"]
+            )
+        ],
     }
 
 
 def reminder_context(store, customer_name, as_of=None):
     payload = customer_follow_up(store, customer_name, as_of)
+    settled = {"kept", "kept_on_time", "kept_late", "cancelled", "superseded", "non_cash"}
     open_promises = [
         row for row in payload["promises"]
-        if row.get("payment_status") != "kept"
+        if row.get("payment_status") not in settled
     ]
     next_step = ""
     next_follow_up = ""
@@ -789,6 +985,8 @@ def update_promise(store, promise_id, body, username):
         row["invoice_refs"] = _refs(body.get("invoice_refs"))
     if "staff" in body:
         row["staff"] = clean_text(body.get("staff")) or (username or "")
+    if body.get("status") in ("cancelled", "superseded"):
+        row["status"] = body["status"]
     row["updated_by"] = username or ""
     row["updated_at"] = _now()
     _save(store, PROMISE_TYPE, row["id"], row)
@@ -945,3 +1143,93 @@ def clear_allocation(store, allocation_id, username):
         if item["id"] == promise["id"]:
             return item
     return row
+
+
+def create_target(store, body, username):
+    from vay.recovery import assign_targets, recovery_pools
+
+    name = clean_text(body.get("customer_name"))
+    if not name:
+        raise ValueError("customer_name is required")
+    owner = clean_text(body.get("owner")) or (username or "")
+    if not owner:
+        raise ValueError("owner is required")
+    start = _require_date(body.get("period_start"), "period_start")
+    end = _require_date(body.get("period_end"), "period_end")
+    if end < start:
+        raise ValueError("period_end is before period_start")
+    assigned = _money(body.get("assigned_amount"))
+    if assigned is None or assigned <= 0:
+        raise ValueError("assigned_amount must be a positive number")
+    debts = body.get("debts") or []
+    if debts:
+        pools = recovery_pools(debts)
+        today = _today(None, store)
+        if end >= today:
+            replaced = clean_text(body.get("supersedes"))
+            existing = [
+                row for row in _rows(store, TARGET_TYPE)
+                if _key(row.get("customer_name")) == _key(name)
+                and current_target(row, today)
+                and row.get("id") != replaced
+            ]
+            counted = assign_targets(
+                existing + [{"id": "new", "assigned_amount": assigned, "status": "open", "created_at": "9999"}],
+                pools["actionable"],
+            )
+            fitted = float(counted["targets"][-1]["counted"])
+            if fitted + 0.009 < assigned:
+                raise ValueError("assigned amount is outside the actionable pool")
+            assigned = fitted
+    supersedes = clean_text(body.get("supersedes"))
+    if supersedes:
+        previous = _find(_rows(store, TARGET_TYPE), supersedes)
+        if not previous:
+            raise ValueError("Target not found")
+        previous["status"] = "superseded"
+        previous["updated_by"] = username or ""
+        previous["updated_at"] = _now()
+        _save(store, TARGET_TYPE, previous["id"], previous)
+    stamp = _now()
+    uk = uuid.uuid4().hex
+    fields = {
+        "customer_name": name,
+        "owner": owner,
+        "period_start": start,
+        "period_end": end,
+        "debt_ids": [str(debt.get("id") or "") for debt in debts if debt.get("id")],
+        "debts": debts,
+        "assigned_amount": assigned,
+        "baseline_amount": assigned,
+        "remaining": assigned,
+        "status": "open",
+        "supersedes": supersedes,
+        "next_step": clean_text(body.get("next_step")),
+        "created_by": username or "",
+        "created_at": stamp,
+        "updated_by": username or "",
+        "updated_at": stamp,
+    }
+    _save(store, TARGET_TYPE, uk, fields)
+    _audit(store, "collection_target", username, "Create target %s" % name)
+    return _target_view(fields | {"id": uk})
+
+
+def update_target(store, target_id, body, username):
+    row = _find(_rows(store, TARGET_TYPE), target_id)
+    if not row:
+        raise ValueError("Target not found")
+    if (row.get("status") or "open") != "open":
+        raise ValueError("Only an open target can be changed")
+    if "owner" in body:
+        owner = clean_text(body.get("owner"))
+        if not owner:
+            raise ValueError("owner is required")
+        row["owner"] = owner
+    if "next_step" in body:
+        row["next_step"] = clean_text(body.get("next_step"))
+    row["updated_by"] = username or ""
+    row["updated_at"] = _now()
+    _save(store, TARGET_TYPE, row["id"], row)
+    _audit(store, "collection_target", username, "Update target %s" % (row.get("customer_name") or target_id))
+    return _target_view(row)

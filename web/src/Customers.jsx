@@ -228,6 +228,31 @@ function DueTable({ rows, canSales, onOpenInvoice }) {
   );
 }
 
+function PurchaseBehavior({ behavior }) {
+  if (!behavior) return null;
+  const gap = behavior.median_gap_days == null ? "Unavailable" : behavior.median_gap_days + " days";
+  const variation = behavior.gap_variation_days == null ? "Unavailable" : behavior.gap_variation_days + " days";
+  return (
+    <div className="card" style={{ marginBottom: 12 }}>
+      <h3>Observed purchases</h3>
+      <p className="muted">{behavior.evidence} {behavior.customer_kind_label}.</p>
+      <div className="buy-tiles">
+        <div className="buy-tile"><span>Occasions</span><strong>{behavior.purchase_occasions}</strong></div>
+        <div className="buy-tile"><span>Invoices</span><strong>{behavior.invoice_count}</strong></div>
+        <div className="buy-tile"><span>Value</span><strong>{money(behavior.value)}</strong></div>
+        <div className="buy-tile"><span>Quantity</span><strong>{behavior.quantity == null ? "—" : behavior.quantity}</strong></div>
+        <div className="buy-tile"><span>Median gap</span><strong>{gap}</strong></div>
+        <div className="buy-tile"><span>Variation</span><strong>{variation}</strong></div>
+      </div>
+      {behavior.late_cycle ? <p className="warn">Later than the usual gap between purchases.</p> : null}
+      {behavior.cycle_reason ? <p className="muted">{behavior.cycle_reason}</p> : null}
+      {(behavior.product_mix || []).length ? (
+        <p className="muted">Mix {behavior.product_mix.map((row) => row.name + " " + money(row.amount)).join(" · ")}</p>
+      ) : null}
+    </div>
+  );
+}
+
 function BuyingTable({ title, rows, canStock, onOpenItem }) {
   const [sort, setSort] = useState("amount");
   const [dir, setDir] = useState("desc");
@@ -1244,7 +1269,8 @@ function Profile({ detail, runId, canSales, canStock, canEditDueDays, canManage,
       {tab === "buying" ? (
         sectionPending ? <EmptyCard title="Loading buying" copy="Reading items this customer has bought." /> : (
           <div>
-            {buying.last_order_date ? <p className="muted">Last order {buying.last_order_date}{buying.usual?.length ? " · Usually " + buying.usual.slice(0, 3).join(", ") : ""}</p> : null}
+            <PurchaseBehavior behavior={view.purchase_behavior} />
+            {buying.last_order_date ? <p className="muted">Last purchase {buying.last_order_date}{buying.usual?.length ? " · Usually " + buying.usual.slice(0, 3).join(", ") : ""}</p> : null}
             <div className="chips">
               {BUYING_CHIPS.map((id) => (
                 <button type="button" key={id} className={period === id ? "" : "secondary"} onClick={() => setPeriod(id)}>

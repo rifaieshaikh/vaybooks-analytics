@@ -65,7 +65,7 @@ def _customer_row(assessment, name):
     return None
 
 
-def project_customer(customer, as_of, bands=None, start_month=None):
+def project_customer(customer, as_of, bands=None, start_month=None, mode=None):
     """Screen fields for one ledger customer. An unknown opening is not shown as zero."""
     if not customer:
         return None
@@ -164,7 +164,7 @@ def project_customer(customer, as_of, bands=None, start_month=None):
         due = None
         status = "unknown"
     opening = customer.get("opening") or {}
-    return {
+    result = {
         "due": due,
         "credit": due is not None and due < 0,
         "balance_exact": exact,
@@ -202,11 +202,167 @@ def project_customer(customer, as_of, bands=None, start_month=None):
             coverage=customer.get("coverage") or {},
         ),
     }
+    return _shape_customer_due(result, customer, mode or "oldest", as_of, bands)
+
+
+def _shape_customer_due(projected, customer, mode, as_of, bands):
+    """Due sits on invoices. Oldest uses the newest invoices up to the ARR balance."""
+    settlement = (customer or {}).get("settlement") or {}
+    reconciliation = settlement.get("reconciliation") or {}
+    checkpoint = _num(reconciliation.get("checkpoint_net"))
+    difference = _num(reconciliation.get("difference"))
+    if mode == "specific":
+        lines = [line for line in projected.get("open_invoices") or [] if line.get("kind") != "opening"]
+        lines.sort(key=lambda line: str(line.get("date") or ""), reverse=True)
+    else:
+        lines = _due_on_latest_invoices(settlement, checkpoint, as_of)
+        if lines is None:
+            lines = [line for line in projected.get("open_invoices") or [] if line.get("kind") != "opening"]
+            lines.sort(key=lambda line: str(line.get("date") or ""), reverse=True)
+    buckets = empty_buckets(bands)
+    unknown = 0.0
+    for line in lines:
+        if line.get("unknown_age"):
+            unknown += line.get("due") or 0
+        else:
+            buckets[bucket_key(line.get("age_days") or 0, bands)] += line.get("due") or 0
+    projected["open_invoices"] = lines
+    projected["invoices_waiting"] = len(lines)
+    projected["owe_buckets"] = buckets
+    projected["due_buckets"] = buckets
+    projected["unknown_age_due"] = round(unknown, 2)
+    if checkpoint is not None and checkpoint >= 0 and mode != "specific":
+        projected["due"] = checkpoint
+        projected["credit"] = False
+    elif mode == "specific" and checkpoint is not None:
+        projected["due"] = checkpoint
+        projected["credit"] = checkpoint < 0
+    from server.customers import _status_from_open
+    if projected.get("due") is not None:
+        projected["status"] = _status_from_open(projected["due"], lines)
+    line_total = round(sum((line.get("due") or 0) for line in lines), 2)
+    mismatch = difference not in (None, 0) and abs(difference) >= 0.5
+    if checkpoint is not None and abs(line_total - max(checkpoint, 0)) >= 0.5:
+        mismatch = True
+    if mismatch:
+        projected["balance_issue"] = "mismatch"
+        if checkpoint is not None:
+            projected["balance_diff"] = round(line_total - checkpoint, 2)
+    return projected
+
+
+def _due_on_latest_invoices(settlement, checkpoint, as_of):
+    if checkpoint is None or checkpoint <= 0:
+        return None
+    opening_ids = set()
+    faces = {}
+    for debit in settlement.get("open_debits") or []:
+        sid = str(debit.get("source_id") or "")
+        if debit.get("opening") or sid.startswith("opening:"):
+            opening_ids.add(sid)
+            continue
+        faces[sid] = {
+            "invoice": debit.get("invoice_number") or "",
+            "invoice_id": sid,
+            "date": debit.get("invoice_date") or debit.get("effective_date") or "",
+            "amount": _num(debit.get("remaining")) or 0.0,
+        }
+    for row in settlement.get("allocations") or []:
+        sid = str(row.get("debit_id") or "")
+        if not sid or sid in opening_ids or sid.startswith("opening:"):
+            continue
+        paid = _num(row.get("amount")) or 0.0
+        face = faces.get(sid)
+        if face:
+            face["amount"] += paid
+        else:
+            faces[sid] = {
+                "invoice": row.get("invoice_number") or "",
+                "invoice_id": sid,
+                "date": row.get("invoice_date") or "",
+                "amount": paid,
+            }
+    ordered = sorted(faces.values(), key=lambda face: (str(face.get("date") or ""), str(face.get("invoice") or "")), reverse=True)
+    left = checkpoint
+    lines = []
+    as_of_day = parse_date(as_of)
+    for face in ordered:
+        if left <= 0.005:
+            break
+        amount = face.get("amount") or 0.0
+        if amount <= 0.005:
+            continue
+        take = min(left, amount)
+        left -= take
+        day = parse_date(face.get("date"))
+        if as_of_day and day:
+            age = (as_of_day.date() - day.date()).days
+            unknown = False
+        else:
+            age = 0
+            unknown = True
+        lines.append({
+            "kind": "sale",
+            "what": "Sale",
+            "due": round(take, 2),
+            "age_days": age,
+            "unknown_age": unknown,
+            "invoice": face.get("invoice") or "",
+            "invoice_id": face.get("invoice_id") or "",
+            "date": face.get("date") or "",
+            "evidence": "source_confirmed",
+        })
+    return lines
 
 
 def assessment_for(store, as_of):
     assessment, version = current_assessment(store, as_of)
     return assessment, version
+
+
+def attach_purchase_behavior(detail, customer=None):
+    """One exposure figure for the profile, historical purchases, and order check."""
+    from vay.buying import purchase_behavior
+
+    detail = detail or {}
+    events = ((detail.get("ordering") or {}).get("overall") or {}).get("events") or []
+    sales = []
+    for row in events:
+        sales.append({
+            "date": row.get("date_iso") or "",
+            "invoice": row.get("invoice") or "",
+            "amount": row.get("amount") or 0,
+        })
+    products = (((detail.get("buying") or {}).get("periods") or {}).get("all") or {}).get("items") or []
+    movements = []
+    opening_known = detail.get("balance_exact") is not False
+    coverage = {}
+    if customer:
+        coverage = customer.get("coverage") or {}
+        opening_known = "exact_balance" not in (customer.get("withheld_outputs") or [])
+        movements = list(customer.get("movements") or [])
+    behavior = purchase_behavior(
+        sales,
+        as_of=detail.get("as_of"),
+        coverage=coverage,
+        movements=movements,
+        opening_known=opening_known,
+        products=[{"name": row.get("name"), "amount": row.get("amount"), "qty": row.get("qty")} for row in products],
+        exposure=detail.get("due"),
+        exposure_exact=opening_known and detail.get("due") is not None,
+    )
+    detail["purchase_behavior"] = behavior
+    by_date = {}
+    for row in behavior["purchases"]:
+        by_date.setdefault(row["date"], row)
+    for row in events:
+        before = by_date.get(str(row.get("date_iso") or "")[:10])
+        if not before:
+            continue
+        row["exposure_before"] = before["exposure_before"]
+        row["exposure_available"] = before["exposure_available"]
+        row["exposure_age_known"] = before["age_known"]
+    return detail
 
 
 def apply_ledger_customer(store, detail):
@@ -219,11 +375,13 @@ def apply_ledger_customer(store, detail):
     detail["ledger_source_digest"] = version.get("digest") or ""
     if not row:
         return detail
+    from server.customers import get_settlement_mode
     projected = project_customer(
         row,
         detail.get("as_of"),
         bands=detail.get("aging_bands"),
         start_month=detail.get("fiscal_year_start_month"),
+        mode=get_settlement_mode(store),
     )
     if not projected:
         return detail
@@ -279,9 +437,11 @@ def collection_rows(store, as_of):
     if not ledger_enabled(store):
         return None
     assessment, _version = assessment_for(store, as_of)
+    from server.customers import get_settlement_mode
+    mode = get_settlement_mode(store)
     rows = []
     for customer in assessment.get("customers") or []:
-        projected = project_customer(customer, as_of)
+        projected = project_customer(customer, as_of, mode=mode)
         if not projected:
             continue
         due = projected["due"]

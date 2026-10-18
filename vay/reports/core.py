@@ -93,11 +93,7 @@ def _finalize_account_aging(a, ctx):
     keys = band_keys(aging_bands) if aging_bands else BUCKET_KEYS
     invoices = a.get("invoices") or []
     opening_dt = fiscal_year_start(as_of, ctx.get("fiscalYearStartMonth"))
-    if invoices:
-        opening_dt = min(
-            fiscal_year_start(inv["date"], ctx.get("fiscalYearStartMonth"))
-            for inv in invoices if inv.get("date")
-        )
+    fy_start = opening_dt
     bands = a["salesBands"]
     open_lines, owe_buckets, _opening, _odt = allocate_open(
         invoices,
@@ -108,12 +104,14 @@ def _finalize_account_aging(a, ctx):
         receipts=a.get("receipts") or [],
         bands=aging_bands,
         credits=a.get("credits") or [],
+        fy_start=fy_start,
     )
     for key in keys:
         a["owe_" + key] = owe_buckets.get(key) or 0.0
     col, _allocs, _credit, _rem, _op = allocate_collections(
         invoices, a.get("receipts") or [], as_of, opening_dt=opening_dt, mode=mode,
         due=a.get("balance"), bands=aging_bands, credits=a.get("credits") or [],
+        fy_start=fy_start,
     )
     for key in keys:
         a["col_" + key] = col.get(key) or 0.0

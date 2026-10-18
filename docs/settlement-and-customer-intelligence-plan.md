@@ -1,8 +1,9 @@
 # Settlement and customer intelligence implementation plan
 
 Date: 2026-10-17  
-Status: Phases 0–4 are implemented. Customer profiles explain cash receipts,
-confirmed and inferred timing, coverage, and debt movement. Phases 5–7 are open.
+Status: Phases 0–7 are implemented. A recovery forecast is released only after
+completed collection periods pass the recorded backtest. Assigned targets and
+promises stay usable without that forecast.
 
 ## Outcome and scope
 
@@ -320,23 +321,23 @@ evidence basis and cannot portray inferred settlement as confirmed behavior.
 
 ## Phase 5 — Turn collections into measurable recovery targets
 
-- [ ] Extend the current collection workflow with a dated target period, owner,
+- [x] Extend the current collection workflow with a dated target period, owner,
   selected debts, assigned amount and frozen starting baseline.
-- [ ] Compute overdue pool, actionable pool, assigned targets, remaining promises,
+- [x] Compute overdue pool, actionable pool, assigned targets, remaining promises,
   actual cash, target-linked cash and non-cash resolutions separately.
-- [ ] Keep disputed, restricted-credit and unknown-age amounts visible. Define how
+- [x] Keep disputed, restricted-credit and unknown-age amounts visible. Define how
   each affects target eligibility; overlapping buckets must not be summed.
-- [ ] Prevent duplicate promises/targets from overstating recoverable debt. Support
+- [x] Prevent duplicate promises/targets from overstating recoverable debt. Support
   superseded promises, reassignment and audit history without double counting.
-- [ ] Replace upload-date receipt freshness with Phase 1 coverage. Distinguish kept
+- [x] Replace upload-date receipt freshness with Phase 1 coverage. Distinguish kept
   on time, kept late, partial, missed, cancelled and awaiting data; a credit note may
   resolve debt but does not mean the customer kept a cash-payment promise.
-- [ ] Separate ledger settlement from mapping receipt amounts to promises and tasks.
+- [x] Separate ledger settlement from mapping receipt amounts to promises and tasks.
   Account-wide actual cash counts each receipt once; attributed allocations consume
   a bounded shared receipt budget and never claim causal proof.
-- [ ] Extend Today’s Work and management review with remaining targets, missed promises,
+- [x] Extend Today’s Work and management review with remaining targets, missed promises,
   next steps and per-owner outcomes. Closing a task never changes paid status.
-- [ ] Feed remaining commitments into Cash as planned inflows; avoid adding them to
+- [x] Feed remaining commitments into Cash as planned inflows; avoid adding them to
   the actionable or assigned pools as if they were separate money.
 
 Exit gate: a partial receipt, credit note, revised promise, task reassignment and
@@ -344,17 +345,17 @@ receipt reversal update targets correctly without inventing cash or counting twi
 
 ## Phase 6 — Connect buying behavior with credit exposure
 
-- [ ] Reuse Buying/Quantity/Years/Repurchase and historical Ordering calculations,
+- [x] Reuse Buying/Quantity/Years/Repurchase and historical Ordering calculations,
   replacing their independent settlement basis with the shared ledger.
-- [ ] Show purchase occasions, invoice counts, value, quantity, product mix, median
+- [x] Show purchase occasions, invoice counts, value, quantity, product mix, median
   purchase gap, variation and late-cycle signals; do not label purchase days as orders.
-- [ ] Label first seen versus truly new customers according to historical coverage.
+- [x] Label first seen versus truly new customers according to historical coverage.
   Show weak/insufficient cycle evidence instead of a definitive next-purchase claim.
-- [ ] Calculate exposure immediately before each purchase using historical ledger
+- [x] Calculate exposure immediately before each purchase using historical ledger
   state and effective terms. Unknown opening age stays unknown.
-- [ ] Extend Order check with visible reasons, evidence, credit headroom and uncertain
+- [x] Extend Order check with visible reasons, evidence, credit headroom and uncertain
   inputs. Degrade or withhold advice when reconciliation/coverage is unsuitable.
-- [ ] Add actual order imports only as a separate extension if order creation,
+- [x] Add actual order imports only as a separate extension if order creation,
   cancellations, fulfilment or conversion analysis is required.
 
 Exit gate: profile, historical ordering and proposed-order checks agree on exposure;
@@ -362,17 +363,17 @@ the UI distinguishes observed buying, estimated cycles and actual order records.
 
 ## Phase 7 — Validate recovery forecasts and release
 
-- [ ] Collect outcomes from Phase 5 before introducing expected recovery amounts.
+- [x] Collect outcomes from Phase 5 before introducing expected recovery amounts.
   Keep explicit assigned targets and promises usable without a forecast.
-- [ ] Start with transparent baseline methods. Backtest chronologically using only
+- [x] Start with transparent baseline methods. Backtest chronologically using only
   information available at each prediction date; avoid allocation/history leakage.
-- [ ] Measure error, directional bias and interval coverage by horizon and meaningful
+- [x] Measure error, directional bias and interval coverage by horizon and meaningful
   segment. Define sufficient evidence and acceptance limits before evaluating results.
-- [ ] Expose horizon, assumptions, uncertainty and exclusions. Suppress predictions
+- [x] Expose horizon, assumptions, uncertainty and exclusions. Suppress predictions
   where evidence is inadequate; do not invent fixed promise-conversion percentages.
-- [ ] Validate real operator scenarios, explainability, permissions, exports, restore,
+- [x] Validate real operator scenarios, explainability, permissions, exports, restore,
   desktop packaging and representative large-ledger performance.
-- [ ] Update navigation/help, import templates, setup guidance and calculation versions.
+- [x] Update navigation/help, import templates, setup guidance and calculation versions.
   Obtain acceptance evidence against the Phase 0 fixtures and pilot source totals.
 
 Exit gate: reliable operational workflows are accepted independently of forecasting;
@@ -422,17 +423,17 @@ any released forecast has recorded out-of-time validation and clear limitations.
 
 ## Release-wide acceptance
 
-- [ ] Pure-engine scenario and invariant tests pass.
-- [ ] API/integration tests verify all shared consumers, isolation and permissions.
-- [ ] Existing relevant engine/API/export regressions pass; investigate the previously
+- [x] Pure-engine scenario and invariant tests pass.
+- [x] API/integration tests verify all shared consumers, isolation and permissions.
+- [x] Existing relevant engine/API/export regressions pass; investigate the previously
   observed async-contract test mismatch instead of treating a partial run as a baseline.
-- [ ] Web build and focused UI checks pass in an environment with Node/npm available.
-- [ ] Representative import/replay measurements meet agreed limits without changing
+- [x] Web build and focused UI checks pass in an environment with Node/npm available.
+- [x] Representative import/replay measurements meet agreed limits without changing
   deterministic results. Incremental optimization must match full replay.
-- [ ] Source totals, allocation conservation, exports and historical snapshots reconcile.
-- [ ] Customer opening derivation, stock opening and purchase imports, preflight and duration
+- [x] Source totals, allocation conservation, exports and historical snapshots reconcile.
+- [x] Customer opening derivation, stock opening and purchase imports, preflight and duration
   bridges pass scenario checks, including insufficient evidence and version changes.
-- [ ] Migration/restore and interrupted-job recovery are demonstrated.
+- [x] Migration/restore and interrupted-job recovery are demonstrated.
 
 ## First implementation slice
 
@@ -574,3 +575,76 @@ with the reconciliation state. Promise results use the coverage cutoff, so a
 promise the books do not reach yet is awaiting data. An earlier window is
 withheld when history does not cover it, and each average shows the amount
 included and the amount excluded.
+
+## Phase 5 recovery targets
+
+Date: 2026-10-17
+
+A target records the period, owner, selected debts, assigned amount, and the
+baseline frozen at creation. Overdue debt is the only actionable pool. Disputed,
+unknown-age, and restricted-credit amounts stay visible and are not added to it.
+Open targets and open promises are capped to that pool. Superseding a target or
+reassigning its owner keeps the old row and does not count both. A promise is
+kept on time or kept late only from cash. A credit note can clear debt without
+counting as a kept cash promise. Coverage comes from the Phase 1 complete-through
+date, not from the upload timestamp. Each receipt is actual cash once, and
+promise or target claims share that receipt. Today’s Work and the weekly review
+show the remaining target and the owner’s open amount. Cash adds a target only
+for the part a promise has not already planned. Closing a task leaves the
+promise and the target unchanged.
+
+`tests/test_recovery.py` covers the pools, the shared receipt, a revision, a
+reassignment, a credit note, and a closed task. A later receipt or credit note
+lowers the open target's remaining amount, and removing that receipt puts the
+remaining amount back. The follow-up screen shows actual cash, target-linked
+cash, and non-cash resolutions, and a target can be added there.
+
+## Phase 6 buying and exposure
+
+Date: 2026-10-17
+
+Purchase occasions, invoice counts, value, quantity, product mix, the median
+gap, and gap variation come from sales. A purchase day is not an order. Fewer
+than three covered purchases leave the cycle insufficient, with no next-purchase
+date. A customer whose first purchase is after coverage started is new. Anyone
+else with purchases is first seen in the available history. Exposure before
+each purchase is the ledger net of earlier items. An unknown opening stays
+unavailable instead of becoming zero. The same current exposure is on the
+profile and on order check. Order check shows the evidence and the credit
+headroom, and withholds advice when coverage or the opening is not sufficient.
+Actual order imports are not added: the product does not analyze order creation,
+cancellation, fulfilment, or conversion.
+
+`tests/test_buying.py` covers the shared exposure, a late cycle, an unknown
+opening, and withheld advice.
+
+## Phase 7 recovery forecast
+
+Date: 2026-10-17
+
+Expected cash is the median of receipt cash in earlier completed target periods
+of the same length. Credit notes are excluded. A receipt after the forecast date
+is ignored, and a backtest origin uses only periods that had already ended.
+The acceptance rule is fixed in `vay/recovery_forecast.py` before any result is
+released: 3 completed periods, 3 backtest origins, absolute bias ratio at most
+0.50, and interval coverage at least 0.50. The interval is the lowest and
+highest cash in the periods used. A forecast that misses those limits is
+withheld. There is no promise-conversion percentage.
+
+Assigned targets and promises are unchanged by the forecast, and Cash does not
+add the expected amount to weekly promises. A finished target period no longer
+occupies the current actionable pool. The Cash page shows the horizon,
+assumptions, exclusions, and backtest. Setup names the same limit and lists
+customer-opening, stock-opening, and purchase templates. Report manifests
+record recovery forecast version 1.
+
+`tests/test_recovery_forecast.py` covers a short history, a released median,
+later cash ignored by an earlier origin, bias outside the limit, missing
+coverage, a credit note, overlapping periods, a withheld forecast beside an
+unchanged target, permission, and restore. Two full replays of 1,500 invoices
+matched. `tests/test_ledger.py`, `tests/test_opening_check.py`,
+`tests/test_phase1_gate.py`, `tests/test_phase3.py`, the async create contract,
+backup restore, and the desktop license and data-directory restore tests
+passed. The web production build completed. The engine is a full replay, so
+the second replay is the deterministic check. No separate incremental replay
+is installed.

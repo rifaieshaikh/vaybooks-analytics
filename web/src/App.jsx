@@ -29,15 +29,23 @@ import { profitRan } from "./reportUtils";
 import { hashReset, hashSet } from "./format";
 import "./styles.css";
 
-function DemoCard({ user, onOpened }) {
+function DemoCard({ user, runs, onOpened }) {
   const [status, setStatus] = useState(null);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
+  const reportKey = (runs || []).map((row) => (row.id || "") + ":" + (row.status || "") + ":" + (row.demo ? "1" : "0")).join("|");
   useEffect(() => {
-    if (!can(user, "reports.create")) return;
-    api.demoStatus().then(setStatus).catch(() => setStatus(null));
-  }, [user]);
-  if (!can(user, "reports.create") || !status || status.blocked) return null;
+    if (!can(user, "reports.create")) return undefined;
+    let cancelled = false;
+    api.demoStatus().then((next) => {
+      if (!cancelled) setStatus(next);
+    }).catch(() => {
+      if (!cancelled) setStatus(null);
+    });
+    return () => { cancelled = true; };
+  }, [user, reportKey]);
+  const hasRealReport = (runs || []).some((row) => row.status === "succeeded" && !row.demo);
+  if (!can(user, "reports.create") || !status || status.blocked || hasRealReport) return null;
   async function open() {
     setBusy(true);
     setErr("");
@@ -419,7 +427,7 @@ export default function App() {
         </header>
         <main className="content">
           <SetupWizard user={user} onGo={go} />
-          <DemoCard user={user} onOpened={loadRuns} />
+          {item?.kind === "home" ? <DemoCard user={user} runs={runs} onOpened={loadRuns} /> : null}
           {item && !destinationAllowed(user, item) ? <p className="muted">That page is not available for this account.</p> : null}
           {destinationAllowed(user, item) && item?.kind === "home" ? (
             <DashboardPage

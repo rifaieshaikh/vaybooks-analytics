@@ -852,7 +852,7 @@ def _status_from_open(due, open_lines):
     return due_status(oldest, due)
 
 
-def _allocate_open(invoices, due, as_of, opening_dt=None, mode=None, receipts=None, bands=None, credits=None):
+def _allocate_open(invoices, due, as_of, opening_dt=None, mode=None, receipts=None, bands=None, credits=None, fy_start=None, opening_amount=None):
     return settlement_allocate_open(
         invoices,
         due,
@@ -864,6 +864,8 @@ def _allocate_open(invoices, due, as_of, opening_dt=None, mode=None, receipts=No
         receipts=receipts,
         bands=bands,
         credits=credits,
+        fy_start=fy_start,
+        opening_amount=opening_amount,
     )
 
 
@@ -890,9 +892,22 @@ def _receipts_for_party(store, name_l, book=None):
     return out
 
 
+def _split_statement(rows, fy_start, as_of):
+    prior = 0.0
+    current = []
+    for day, amount in rows or []:
+        if as_of is not None and day > as_of:
+            continue
+        if fy_start is not None and day < fy_start:
+            prior += amount
+        else:
+            current.append((day, amount))
+    return prior, current
+
+
 def ar_mismatch_for_party(store, name_l, due, as_of, book=None, tolerance=None, start_month=None):
     """Period sales, collection, credit notes, and closing balance for one customer."""
-    from server.ar_balance import build_ar_statement, opening_from_gap
+    from server.ar_balance import build_ar_statement
     from server.org_policy import get_org_policy
 
     if tolerance is None or start_month is None:
@@ -926,18 +941,15 @@ def ar_mismatch_for_party(store, name_l, due, as_of, book=None, tolerance=None, 
             continue
         credits.append((d, amount))
 
-    def _sum_in_period(rows):
-        total = 0.0
-        for day, amount in rows:
-            if as_of is not None and day > as_of:
-                continue
-            total += amount
-        return total
-
-    gap = _sum_in_period(sales) - _sum_in_period(receipts) - _sum_in_period(credits)
-    opening = opening_from_gap(due, gap)
+    fy_start = fiscal_year_start(as_of, start_month)
+    prior_sales, fy_sales = _split_statement(sales, fy_start, as_of)
+    prior_receipts, fy_receipts = _split_statement(receipts, fy_start, as_of)
+    prior_credits, fy_credits = _split_statement(credits, fy_start, as_of)
+    opening = _party_opening_amount(book, name_l)
+    if opening is None:
+        opening = prior_sales - prior_receipts - prior_credits
     return build_ar_statement(
-        sales, receipts, credits, due, as_of,
+        fy_sales, fy_receipts, fy_credits, due, as_of,
         start_month=start_month, tolerance=tolerance, opening=opening,
     )
 
@@ -1219,10 +1231,20 @@ def build_settlements_summary(allocs, as_of, bands=None, credit=0.0, start_month
     }
 
 
-def _settle_party(invoices, receipts, as_of, opening_dt, mode, due, bands=None, credits=None, start_month=None):
+def _party_opening_amount(book, name):
+    """ARR opening when the card has one. Missing means the prior-year net is used."""
+    arr = ((book or {}).get("arr_by_uk") or {}).get(account_uk(name).lower()) or {}
+    fields = arr.get("fields") or {}
+    for key in ("OB", "Opening Balance", "Opening"):
+        if fields.get(key) not in (None, ""):
+            return number_(fields.get(key))
+    return None
+
+
+def _settle_party(invoices, receipts, as_of, opening_dt, mode, due, bands=None, credits=None, start_month=None, fy_start=None, opening_amount=None):
     buckets, allocs, credit, rem, op = allocate_collections(
         invoices, receipts, as_of, opening_dt=opening_dt, mode=mode, due=due, bands=bands,
-        credits=credits,
+        credits=credits, fy_start=fy_start, opening_amount=opening_amount,
     )
     settlements = build_settlements_summary(
         allocs, as_of, bands=bands, credit=credit, start_month=start_month,
@@ -2453,14 +2475,18 @@ def summarize_customer(store, doc, as_of=None):
     sm = _fy_month(store, book)
     act = _activity(store, name_l, as_of, book=book, bands=bands, start_month=sm)
     invoices = _group_sales_invoices(_rows_for_name(store, "sales", name_l, book=book), start_month=sm)
-    opening_dt = _opening_from_invoices(invoices, as_of, sm)
+    fy_start = fiscal_year_start(as_of, sm)
+    opening_dt = fy_start
+    brought_forward = _party_opening_amount(book, name)
     receipts = _receipts_for_party(store, name_l, book=book)
     credits = _credits_for_party(store, name_l, book=book)
     open_lines, buckets, opening_amount, opening_dt = _allocate_open(
         invoices, due, as_of, opening_dt, mode=mode, receipts=receipts, bands=bands, credits=credits,
+        fy_start=fy_start, opening_amount=brought_forward,
     )
     collection_buckets, settlements, _credit, _rem, _op = _settle_party(
         invoices, receipts, as_of, opening_dt, mode, due, bands=bands, credits=credits, start_month=sm,
+        fy_start=fy_start, opening_amount=brought_forward,
     )
     status = _status_from_open(due, open_lines)
     buying = _buying(store, name_l, as_of, book=book, start_month=sm)
@@ -2581,6 +2607,12 @@ def summarize_customer(store, doc, as_of=None):
         base["ordering"] = ordering
         base["ordered_overdue"] = bool((ordering.get("badge") or {}).get("current_month") or (ordering.get("badge") or {}).get("current_fy"))
         base["ar_mismatch"] = ar_mismatch_for_party(store, name_l, base.get("due"), as_of, book=book)
+    from server.ledger_apply import _customer_row, assessment_for, attach_purchase_behavior
+    customer_row = None
+    if base.get("ledger_engine"):
+        assessment, _version = assessment_for(store, base.get("as_of") or "")
+        customer_row = _customer_row(assessment, base.get("name"))
+    attach_purchase_behavior(base, customer_row)
     return base
 
 
@@ -2681,7 +2713,9 @@ def customer_directory_rows(store):
         salesperson = last_rep.get(name_l) or ""
         sale_d = last_sale.get(name_l)
         invoices = _group_sales_invoices(sales_by_party.get(name_l) or [], start_month=sm)
-        opening_dt = _opening_from_invoices(invoices, as_of, sm)
+        fy_start = fiscal_year_start(as_of, sm)
+        opening_dt = fy_start
+        brought_forward = _party_opening_amount(book, name)
         receipt_rows = []
         for row in receipts_by_party.get(name_l) or []:
             fields_r = row.get("fields") or {}
@@ -2711,16 +2745,18 @@ def customer_directory_rows(store):
             receipts=receipt_rows,
             bands=bands,
             credits=credit_rows,
+            fy_start=fy_start,
+            opening_amount=brought_forward,
         )
         collection_buckets, _a, _c, _rem, _op = allocate_collections(
             invoices, receipt_rows, as_of, opening_dt=opening_dt, mode=mode, due=due, bands=bands,
-            credits=credit_rows,
+            credits=credit_rows, fy_start=fy_start, opening_amount=brought_forward,
         )
         balance_exact = True
         opening_status = ""
         status = _status_from_open(due, open_lines)
         if use_ledger and name_l in ledger_customers:
-            projected = project_customer(ledger_customers[name_l], as_of, bands, sm)
+            projected = project_customer(ledger_customers[name_l], as_of, bands, sm, mode=mode)
             if projected:
                 due = projected["due"]
                 buckets = projected["owe_buckets"]
@@ -2970,12 +3006,14 @@ def ensure_detail_settlements(store, detail, book=None, force=False):
     bands = detail.get("aging_bands") or get_aging_bands(store)
     sm = _fy_month(store, book, detail.get("fiscal_year_start_month"))
     invoices = _group_sales_invoices(_rows_for_name(store, "sales", name_l, book=book), start_month=sm)
-    opening_dt = _opening_from_invoices(invoices, as_of, sm)
+    fy_start = fiscal_year_start(as_of, sm)
+    opening_dt = fy_start
+    brought_forward = _party_opening_amount(book, name)
     receipts = _receipts_for_party(store, name_l, book=book)
     credits = _credits_for_party(store, name_l, book=book)
     collection_buckets, settlements, _credit, _rem, _op = _settle_party(
         invoices, receipts, as_of, opening_dt, mode, due, bands=bands,
-        credits=credits, start_month=sm,
+        credits=credits, start_month=sm, fy_start=fy_start, opening_amount=brought_forward,
     )
     out = detail
     out["collection_buckets"] = collection_buckets

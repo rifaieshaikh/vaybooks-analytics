@@ -280,6 +280,7 @@ def test_create_run_manifest_and_reproduce():
     assert manifest.get("data_version", {}).get("uploads")
     assert manifest.get("calculation_version", {}).get("engine") == "vay.engine.generate"
     assert manifest.get("calculation_version", {}).get("metrics", {}).get("sales_mtd") == 1
+    assert manifest.get("calculation_version", {}).get("recovery_forecast") == "1"
     assert manifest.get("eligibility", {}).get("sales_mtd", {}).get("status") == "eligible"
     assert manifest.get("reconciliation", {}).get("status") == "pass"
     snap1 = body.get("snapshot")

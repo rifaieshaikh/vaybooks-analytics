@@ -21,6 +21,7 @@ ACTIONS = (
     "follow_up",
     "push_back",
     "strong_push_back",
+    "withhold",
 )
 
 ACTION_LABELS = {
@@ -29,6 +30,7 @@ ACTION_LABELS = {
     "follow_up": "Follow up",
     "push_back": "Push back",
     "strong_push_back": "Strong push back",
+    "withhold": "Advice withheld",
 }
 
 REASON_GROUP = {
@@ -37,6 +39,7 @@ REASON_GROUP = {
     "past_due_days": "credit",
     "followup_age": "credit",
     "credit_limit": "credit",
+    "coverage": "evidence",
     "max_order_value": "size",
     "order_vs_avg": "size",
     "order_vs_usual_qty": "size",
@@ -55,6 +58,7 @@ REASON_GROUP_LABELS = {
     "behavior": "Behavior",
     "premium": "Premium",
     "ok": "OK",
+    "evidence": "Evidence",
 }
 
 # Higher = more severe
@@ -514,7 +518,11 @@ def evaluate_order_check(detail, *, order_value=None, order_qty=None, policy=Non
     blacklisted = bool(flags.get("blacklisted"))
 
     limit_factor = float(policy.get("premium_limit_factor") or 1.0) if premium else 1.0
-    due = float(number_(detail.get("due") or 0))
+    behavior = detail.get("purchase_behavior") or {}
+    if behavior.get("exposure_available"):
+        due = float(behavior.get("exposure") or 0)
+    else:
+        due = float(number_(detail.get("due") or 0))
     due_days = int(number_(detail.get("due_days") if detail.get("due_days") is not None else 30))
     due_days_source = clean_text(detail.get("due_days_source") or "default") or "default"
 
@@ -553,10 +561,20 @@ def evaluate_order_check(detail, *, order_value=None, order_qty=None, policy=Non
     if blacklisted:
         action = "strong_push_back"
         reasons.append(_reason("blacklisted", "Customer is blacklisted — do not create an order."))
-        return _result(
+        return _decorate(_result(
             action, reasons, suggested_value, suggested_qty, policy, flags,
             signals=signals_now(),
-        )
+        ), behavior, proposed_value)
+
+    if behavior.get("advice") == "withhold":
+        reasons.append(_reason(
+            "coverage",
+            " ".join(behavior.get("uncertain") or ["Coverage is not sufficient for order advice."]),
+        ))
+        return _decorate(_result(
+            "withhold", reasons, None, None, policy, flags,
+            signals=signals_now(),
+        ), behavior, proposed_value)
 
     followup_age = int(policy.get("followup_age_days") or 15)
     urgent_age = int(policy.get("urgent_age_days") or 30)
@@ -722,10 +740,26 @@ def evaluate_order_check(detail, *, order_value=None, order_qty=None, policy=Non
         if suggested_qty is None and usual_qty > 0:
             suggested_qty = round(usual_qty * float(policy.get("reduce_vs_usual") or 1.0), 2)
 
-    return _result(
+    return _decorate(_result(
         action, reasons, suggested_value, suggested_qty, policy, flags,
         signals=signals_now(),
-    )
+    ), behavior, proposed_value)
+
+
+def _decorate(result, behavior, proposed_value):
+    exposure = behavior.get("exposure") if behavior.get("exposure_available") else None
+    credit = (result.get("policy") or {}).get("credit_limit")
+    headroom = None
+    if exposure is not None and credit not in (None, ""):
+        headroom = round(float(credit) - float(exposure) - float(proposed_value or 0), 2)
+    result["exposure"] = None if exposure is None else round(float(exposure), 2)
+    result["exposure_exact"] = bool(behavior.get("exposure_exact"))
+    result["headroom"] = headroom
+    result["evidence"] = behavior.get("evidence") or ""
+    result["uncertain"] = list(behavior.get("uncertain") or [])
+    result["cycle_evidence"] = behavior.get("cycle_evidence") or ""
+    result["customer_kind_label"] = behavior.get("customer_kind_label") or ""
+    return result
 
 
 def _signals(due, due_days, due_days_source, oldest, oldest_kind, oldest_what, avg_sale, usual_qty, avg_gap, days_since, flagged_ratio, settle_old, proposed_value, proposed_qty):

@@ -322,10 +322,10 @@ def test_customer_360_follows_org_fiscal_year():
     assert by_start["2026-01-01"]["collection"] == 40
     assert by_start["2025-01-01"]["sales"] == 200
     assert by_start["2025-01-01"]["collection"] == 10
-    assert detail["opening_date"].startswith("2025-01-01")
+    assert detail["opening_date"].startswith("2026-01-01")
     settle = {row["start"]: row["total"] for row in detail["settlements"]["by_fy"]}
     assert settle["2026-01-01"] == 40
-    assert settle["2025-01-01"] == 10
+    assert "2025-01-01" not in settle
     this_year = {item["name"]: item for item in detail["buying"]["periods"]["this_year"]["items"]}
     last_year = {item["name"]: item for item in detail["buying"]["periods"]["last_year"]["items"]}
     assert this_year["Board"]["qty"] == 1

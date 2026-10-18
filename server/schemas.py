@@ -199,6 +199,19 @@ class CollectionPromiseBody(BaseModel):
     promised_on: str = ""
     invoice_refs: list | str = ""
     staff: str = ""
+    status: str = ""
+
+
+class CollectionTargetBody(BaseModel):
+    customer_name: str = ""
+    owner: str = ""
+    period_start: str = ""
+    period_end: str = ""
+    assigned_amount: float | None = None
+    debts: list = Field(default_factory=list)
+    supersedes: str = ""
+    next_step: str = ""
+    remaining: float | None = None
 
 
 class CollectionDisputeBody(BaseModel):

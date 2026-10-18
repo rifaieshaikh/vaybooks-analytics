@@ -2,12 +2,13 @@
 
 Shared by Customer/Group/Rep 360 and performance reports (no store/Mongo).
 
-Settlement modes (receipts):
-  oldest   — opening first, then invoices oldest → newest (default)
-  specific — match Invoice No first; remainder (or no match) uses oldest FIFO
+Settlement modes (receipts and credit notes), current fiscal year only when fy_start is set:
+  oldest   — invoices oldest → newest, then opening (default)
+  specific — one matching sales invoice first; remainder, no match, or an
+             ambiguous number uses the same oldest order
 
-Outstanding (due): always LIFO on invoice remainders after settlement;
-fully settled invoices are excluded; leftover ARR → opening.
+Activity before fy_start is the opening (or an opening credit). It is not
+settled again. Outstanding due lines are what that settlement leaves unpaid.
 
 Age bands: configurable list of {key, label, max_days|null}; last band is open-ended.
 """
@@ -221,7 +222,35 @@ def _opening_line(opening_dt, take, age, fmt_day=None, iso=None):
     return line
 
 
-def allocate_collections(invoices, receipts, as_of, opening_dt=None, mode=None, due=None, bands=None, credits=None):
+def _split_at(rows, fy_start):
+    """Rows dated before fy_start are prior-period. Undated rows stay in the year."""
+    prior = []
+    current = []
+    for row in rows or []:
+        day = row.get("date")
+        if day is not None and fy_start is not None and day < fy_start:
+            prior.append(row)
+        else:
+            current.append(row)
+    return prior, current
+
+
+def _row_total(rows):
+    return sum(max(0.0, number_(row.get("amount"))) for row in (rows or []))
+
+
+def allocate_collections(
+    invoices,
+    receipts,
+    as_of,
+    opening_dt=None,
+    mode=None,
+    due=None,
+    bands=None,
+    credits=None,
+    fy_start=None,
+    opening_amount=None,
+):
     """Apply receipts; return (collection_buckets, allocations, credit, open_invoices).
 
     open_invoices: list of invoice dicts with remaining > 0 after settlement
@@ -259,7 +288,25 @@ def allocate_collections(invoices, receipts, as_of, opening_dt=None, mode=None, 
         key=lambda c: c["date"],
     )
 
-    if due is None:
+    brought_forward = 0.0
+    if fy_start is not None:
+        prior_invoices, opens = _split_at(opens, fy_start)
+        prior_receipts, ordered_receipts = _split_at(ordered_receipts, fy_start)
+        prior_credits, ordered_credits = _split_at(ordered_credits, fy_start)
+        prior_net = _row_total(prior_invoices) - _row_total(prior_receipts) - _row_total(prior_credits)
+        if opening_amount is None:
+            brought_forward = prior_net
+        else:
+            brought_forward = number_(opening_amount)
+        opening_remaining = max(0.0, brought_forward)
+        if brought_forward < -0.005:
+            ordered_credits.append({
+                "date": fy_start,
+                "amount": abs(brought_forward),
+                "invoice": "",
+            })
+            ordered_credits.sort(key=lambda row: row["date"])
+    elif due is None:
         opening_remaining = 0.0
     else:
         opening_remaining = estimate_opening_amount(due, invoices, ordered_receipts, ordered_credits)
@@ -296,12 +343,7 @@ def allocate_collections(invoices, receipts, as_of, opening_dt=None, mode=None, 
         return left_ref
 
     def apply_fifo(left, event_date, collect=True):
-        """Opening first, then oldest → newest invoices."""
-        if left <= 0:
-            return left
-        take = min(left, max(0.0, opening_target["remaining"]))
-        if take > 0:
-            left = apply_to(opening_target, take, event_date, left, collect=collect)
+        """Oldest invoice first. Money left after the invoices stays unsettled."""
         if left <= 0:
             return left
         for target in sort_invoices_fifo(opens):
@@ -324,15 +366,17 @@ def allocate_collections(invoices, receipts, as_of, opening_dt=None, mode=None, 
         event_inv = clean_text(event.get("invoice") or "").lower()
 
         if collect and mode == "specific" and event_inv:
-            for target in opens:
-                if target["remaining"] <= 0:
-                    continue
-                if _invoice_match_key(target) == event_inv:
-                    take = min(left, target["remaining"])
-                    left = apply_to(target, take, event_date, left, collect=True)
-                    break
-            # Remainder (or unmatched): Oldest to latest FIFO
-            left = apply_fifo(left, event_date, collect=True)
+            matches = [
+                target for target in opens
+                if target["remaining"] > 0 and _invoice_match_key(target) == event_inv
+            ]
+            if len(matches) == 1:
+                take = min(left, matches[0]["remaining"])
+                left = apply_to(matches[0], take, event_date, left, collect=True)
+            else:
+                # No sales invoice, or more than one: oldest first.
+                # A receipt larger than its invoice keeps the extra unsettled.
+                left = apply_fifo(left, event_date, collect=True)
         else:
             # Credit notes always clear oldest open first. Their own invoice
             # number is the credit-note document, not a sales invoice.
@@ -357,11 +401,14 @@ def allocate_open(
     receipts=None,
     bands=None,
     credits=None,
+    fy_start=None,
+    opening_amount=None,
 ):
-    """Attribute ARR outstanding LIFO on post-settlement invoice remainders.
+    """Due lines for the screen.
 
-    Fully settled invoices are excluded. Leftover due → opening.
-    Settlement mode only affects how receipts clear invoices first.
+    Oldest: the ARR balance is split across the newest invoices, each up to
+    its own amount. Specific: due is what remains on invoices that are not
+    fully paid. Neither mode parks the difference on an opening balance.
     """
     mode = normalize_mode(mode)
     bands = bands or DEFAULT_AGING_BANDS
@@ -377,36 +424,35 @@ def allocate_open(
         due=due,
         bands=bands,
         credits=credits,
+        fy_start=fy_start,
+        opening_amount=opening_amount,
     )
 
-    # Attribute current ARR due against remaining open invoice balances (LIFO).
-    # remainders already exclude fully settled invoices.
     open_lines = []
-    remaining = outstanding
-    for inv in sort_invoices_lifo(remainders):
-        if remaining <= 0:
-            break
-        open_amt = max(0.0, number_(inv.get("remaining")))
-        if open_amt <= 0:
-            continue
-        take = min(remaining, open_amt)
-        remaining -= take
-        age = age_days(as_of, inv.get("date"))
-        open_lines.append(_line_from_inv(inv, take, age, fmt_day=fmt_day, iso=iso))
-
-    if remaining > 0:
-        age = age_days(as_of, opening_dt)
-        open_lines.append(_opening_line(opening_dt, remaining, age, fmt_day=fmt_day, iso=iso))
+    if mode == "specific":
+        for inv in sort_invoices_lifo(remainders):
+            open_amt = max(0.0, number_(inv.get("remaining")))
+            if open_amt <= 0:
+                continue
+            age = age_days(as_of, inv.get("date"))
+            open_lines.append(_line_from_inv(inv, open_amt, age, fmt_day=fmt_day, iso=iso))
+    else:
+        remaining = outstanding
+        for inv in sort_invoices_lifo(invoices or []):
+            if remaining <= 0:
+                break
+            face = max(0.0, number_(inv.get("amount")))
+            if face <= 0:
+                continue
+            take = min(remaining, face)
+            remaining -= take
+            age = age_days(as_of, inv.get("date"))
+            open_lines.append(_line_from_inv(inv, take, age, fmt_day=fmt_day, iso=iso))
 
     buckets = empty_buckets(bands)
     for line in open_lines:
         buckets[bucket_key(line["age_days"], bands)] += line["due"]
-    opening_amount = 0.0
-    for line in open_lines:
-        if line["kind"] == "opening":
-            opening_amount = line["due"]
-            break
-    return open_lines, buckets, opening_amount, opening_dt
+    return open_lines, buckets, 0.0, opening_dt
 
 
 def oldest_due_invoice(open_lines):

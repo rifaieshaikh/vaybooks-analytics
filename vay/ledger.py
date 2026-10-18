@@ -221,6 +221,8 @@ def settle(
     legal_entity_id="",
     customer_id="",
     currency="",
+    invoices_before_opening=False,
+    reference_fallthrough=False,
 ):
     """Replay one account through ``as_of`` and return allocations, open items, and exceptions.
 
@@ -413,8 +415,13 @@ def settle(
                 by_debit[sid].source_id,
             ))
             return rows
+        def opening_rank(sid):
+            if invoices_before_opening:
+                return 1 if by_debit[sid].opening else 0
+            return 0 if by_debit[sid].opening else 1
+
         rows.sort(key=lambda sid: (
-            0 if by_debit[sid].opening else 1,
+            opening_rank(sid),
             by_debit[sid].invoice_date is None,
             by_debit[sid].invoice_date or by_debit[sid].effective_date or date.min,
             by_debit[sid].sequence,
@@ -533,8 +540,12 @@ def settle(
         debit, status = match_reference(credit.reference)
         credit.no_fifo = True
         if status == "ambiguous":
-            credit.unresolved = True
             reject("ambiguous_reference", "Receipt reference matches more than one invoice.", credit_id=credit.source_id, reference=credit.reference)
+            if reference_fallthrough:
+                credit.no_fifo = False
+                apply_fifo(credit)
+            else:
+                credit.unresolved = True
             return
         if status == "missing":
             if credit.pre_period:
@@ -546,6 +557,10 @@ def settle(
                 if credit.remaining > 0:
                     credit.unresolved = True
                     reject("unresolved_reference", "Pre-period reference exceeds opening debt.", credit_id=credit.source_id, reference=credit.reference)
+                return
+            if reference_fallthrough:
+                credit.no_fifo = False
+                apply_fifo(credit)
                 return
             credit.unresolved = True
             reject("unresolved_reference", "Receipt reference does not match an invoice in this account.", credit_id=credit.source_id, reference=credit.reference)
@@ -563,7 +578,11 @@ def settle(
             return
         taken = add_alloc(credit, debit, credit.remaining, EVIDENCE_SOURCE)
         if credit.remaining > 0 and taken > 0:
-            reject("unapplied_remainder", "Referenced receipt exceeds the invoice. The remainder stays unapplied.", credit_id=credit.source_id, debit_id=debit.source_id)
+            if reference_fallthrough:
+                credit.no_fifo = False
+                apply_fifo(credit)
+            else:
+                reject("unapplied_remainder", "Referenced receipt exceeds the invoice. The remainder stays unapplied.", credit_id=credit.source_id, debit_id=debit.source_id)
 
     def _suggest(credit):
         same = [
@@ -685,6 +704,45 @@ def settle(
             reverse_debit(rev)
         else:
             reject("reversal_target_missing", "Reversal does not match a ledger item.", source_id=rev.source_id, reverses_id=rev.reverses_id)
+
+    if invoices_before_opening:
+        # A receipt that arrived before a later invoice may have paid the opening.
+        # This year's invoices are cleared before that opening.
+        def open_invoices():
+            rows = [
+                by_debit[sid] for sid in open_ids
+                if not by_debit[sid].opening and not by_debit[sid].void and by_debit[sid].remaining > 0
+            ]
+            rows.sort(key=lambda item: (item.invoice_date or date.min, item.source_id))
+            return rows
+
+        for row in list(allocations):
+            if row.amount <= 0:
+                continue
+            opening_debit = by_debit.get(row.debit_id)
+            if opening_debit is None or not opening_debit.opening:
+                continue
+            left = row.amount
+            for invoice in open_invoices():
+                if left <= 0:
+                    break
+                move = money(min(left, invoice.remaining))
+                if move <= 0:
+                    continue
+                invoice.remaining = money(invoice.remaining - move)
+                opening_debit.remaining = money(opening_debit.remaining + move)
+                left = money(left - move)
+                allocations.append(_Alloc(
+                    credit_id=row.credit_id,
+                    debit_id=invoice.source_id,
+                    amount=move,
+                    evidence=row.evidence,
+                    effective_date=row.effective_date,
+                    cash=row.cash,
+                    credit_kind=row.credit_kind,
+                    order=len(allocations),
+                ))
+            row.amount = left
 
     for credit in by_credit.values():
         if credit.reserved > 0:
@@ -1316,7 +1374,10 @@ def _assess_customer(raw, *, as_of, policy):
     if debits or credits or raw.get("checkpoint_net") is not None:
         settlement = settle(
             debits, credits, raw.get("links") or [], raw.get("reversals") or [],
-            policy=policy, as_of=as_of, checkpoint=raw.get("checkpoint_net"), **scope,
+            policy=policy, as_of=as_of, checkpoint=raw.get("checkpoint_net"),
+            invoices_before_opening=bool(raw.get("invoices_before_opening")),
+            reference_fallthrough=bool(raw.get("reference_fallthrough")),
+            **scope,
         )
     exact = chosen["status"] in (STATUS_IMPORTED, STATUS_RECONSTRUCTED)
     unknown_age = chosen["status"] != STATUS_IMPORTED or any(
@@ -1351,6 +1412,25 @@ def _assess_customer(raw, *, as_of, policy):
         },
         "bridge": bridge,
         "settlement": settlement,
+        "movements": [
+            {
+                "date": row.get("effective_date"),
+                "amount": str(row.get("amount") or 0),
+                "side": "debit",
+                "opening": bool(row.get("opening")),
+                "unknown_age": bool(row.get("opening")) and not row.get("invoice_date"),
+            }
+            for row in debits
+        ] + [
+            {
+                "date": row.get("effective_date"),
+                "amount": str(row.get("amount") or 0),
+                "side": "credit",
+                "opening": bool(row.get("opening")),
+                "unknown_age": False,
+            }
+            for row in credits
+        ],
         "allowed_outputs": allowed,
         "withheld_outputs": withheld,
     }
