@@ -571,3 +571,19 @@ def test_missing_opening_withholds_exact_balance_but_keeps_sales():
     assert customer["opening"]["amount"] is None
     assert "sales" in customer["allowed_outputs"]
     assert "exact_balance" in customer["withheld_outputs"]
+
+
+def test_due_invoice_keeps_its_date_label():
+    from server.ledger_apply import _due_on_latest_invoices
+
+    lines = _due_on_latest_invoices({
+        "open_debits": [{
+            "source_id": "A",
+            "invoice_number": "INV-1",
+            "invoice_date": "2026-09-01",
+            "remaining": "40",
+        }],
+        "allocations": [],
+    }, 40, "2026-10-18")
+    assert lines[0]["date"] == "2026-09-01"
+    assert lines[0]["date_label"] == "01 Sep 2026"

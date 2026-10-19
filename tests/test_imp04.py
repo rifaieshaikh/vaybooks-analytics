@@ -47,6 +47,12 @@ def _customer(store, name, **fields):
     store.upsert_row({"type": "customer", "uk": name, "fields": body})
 
 
+def prepare(c):
+    refreshed = c.post("/api/worklist/refresh")
+    assert refreshed.status_code == 200, refreshed.text
+    return refreshed.json()
+
+
 def _contact(c, name, when):
     created = c.post("/api/collection/contacts", json={
         "customer_name": name,
@@ -73,6 +79,7 @@ def test_salesperson_sees_only_assigned_reps_and_cannot_open_another_queue():
     assert c.post("/api/users", json={"username": "rita", "password": "rita12345", "role": "Sales"}).status_code == 200
     assert c.patch("/api/users/asha", json={"sales_reps": ["Asha"]}).status_code == 200
     assert c.patch("/api/users/rita", json={"sales_reps": ["Rita"]}).status_code == 200
+    prepare(c)
 
     asha = login("asha", "asha12345")
     own = asha.get("/api/worklist")
@@ -106,6 +113,7 @@ def test_matching_follow_up_and_action_are_one_row():
         "report_date": "2026-10-03",
     })
     assert created.status_code == 200, created.text
+    prepare(c)
     body = c.get("/api/worklist")
     assert body.status_code == 200, body.text
     matched = [row for row in body.json()["rows"] if row["customer"] == "Northwind" and row["kind"] == "follow_up"]
@@ -134,6 +142,7 @@ def test_done_work_and_a_future_follow_up_leave_the_queue_and_stay_in_history():
     assert created.status_code == 200, created.text
     done = c.post("/api/actions/%s/status" % created.json()["id"], json={"status": "done"})
     assert done.status_code == 200, done.text
+    prepare(c)
     rows = c.get("/api/worklist").json()["rows"]
     assert "Later" not in [row["customer"] for row in rows]
     assert "Finished" not in [row["customer"] for row in rows]
@@ -182,6 +191,7 @@ def test_pending_promise_is_not_marked_missed_and_blocks_name_the_next_step():
         "effective_date": "2026-10-03",
         "fields": {"Item Name": "Widget", "Qty": 1, "P.Price": 4, "EffectiveDate": "2026-10-03"},
     })
+    prepare(c)
     body = c.get("/api/worklist")
     assert body.status_code == 200, body.text
     rows = body.json()["rows"]

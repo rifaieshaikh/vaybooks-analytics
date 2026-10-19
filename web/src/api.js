@@ -281,6 +281,7 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body || {}),
     }),
+  cleanupSnapshots: () => req("/api/data/cleanup-snapshots", { method: "POST" }),
   factoryReset: () => req("/api/data/factory-reset", { method: "POST" }),
   uploads: () => req("/api/uploads"),
   previewUpload: (file, type, maps) => {
@@ -382,6 +383,13 @@ export const api = {
     const qs = q.toString();
     return req("/api/worklist" + (qs ? "?" + qs : ""));
   },
+  refreshWorklist: () => req("/api/worklist/refresh", { method: "POST" }),
+  setWorkTaskStatus: (id, status) =>
+    req("/api/worklist/" + encodeURIComponent(id) + "/status", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status }),
+    }),
   users: () => req("/api/users"),
   createUser: (body) =>
     req("/api/users", {

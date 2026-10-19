@@ -5,7 +5,7 @@ Figures come from the same payloads the screens already show.
 
 from vay.export_excel import write_workbook
 
-from server.customers import _detail_bands, stated_money
+from server.customers import _detail_bands, _line_date, stated_money
 
 
 def _blank(value):
@@ -56,7 +56,7 @@ def statement_reports(detail):
         "headers": ["Date", "Invoice", "What", "Still due", "Age"],
         "text_headers": ["Date", "Invoice", "What"],
         "rows": [[
-            row.get("date_label") or "",
+            _line_date(row),
             row.get("invoice") or "",
             row.get("what") or "",
             row.get("due") or 0,

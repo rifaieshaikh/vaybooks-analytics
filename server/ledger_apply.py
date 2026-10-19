@@ -18,6 +18,14 @@ from server.org_policy import get_org_policy, save_org_policy
 LEGACY_ENGINE = "legacy"
 
 
+def _dated(raw):
+    day = parse_date(raw)
+    if not day:
+        text = str(raw or "")
+        return text, text[:10]
+    return day.strftime("%Y-%m-%d"), day.strftime("%d %b %Y")
+
+
 def _public_invoice(line):
     number = str((line or {}).get("invoice") or "").strip()
     if number and "\x1f" not in number:
@@ -84,6 +92,7 @@ def project_customer(customer, as_of, bands=None, start_month=None, mode=None):
         unknown = bool(debit.get("unknown_age")) or debit.get("invoice_age_days") in (None, "")
         age = 0 if unknown else int(_num(debit.get("invoice_age_days")) or 0)
         opening = bool(debit.get("opening"))
+        iso, label = _dated(debit.get("invoice_date") or debit.get("effective_date") or "")
         line = {
             "kind": "opening" if opening else "sale",
             "what": "Opening balance" if opening else "Sale",
@@ -92,7 +101,8 @@ def project_customer(customer, as_of, bands=None, start_month=None, mode=None):
             "unknown_age": unknown,
             "invoice": debit.get("invoice_number") or "",
             "invoice_id": debit.get("source_id") or "",
-            "date": debit.get("invoice_date") or debit.get("effective_date") or "",
+            "date": iso,
+            "date_label": label,
             "evidence": (customer.get("opening") or {}).get("evidence") or "" if opening else "source_confirmed",
         }
         open_lines.append(line)
@@ -294,7 +304,8 @@ def _due_on_latest_invoices(settlement, checkpoint, as_of):
             continue
         take = min(left, amount)
         left -= take
-        day = parse_date(face.get("date"))
+        iso, label = _dated(face.get("date"))
+        day = parse_date(iso)
         if as_of_day and day:
             age = (as_of_day.date() - day.date()).days
             unknown = False
@@ -309,7 +320,8 @@ def _due_on_latest_invoices(settlement, checkpoint, as_of):
             "unknown_age": unknown,
             "invoice": face.get("invoice") or "",
             "invoice_id": face.get("invoice_id") or "",
-            "date": face.get("date") or "",
+            "date": iso,
+            "date_label": label,
             "evidence": "source_confirmed",
         })
     return lines

@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Response
 
 from server.auth import assert_perm, require_user, type_perm
-from server.cleanup import cleanup_imported_data, factory_reset
+from server.cleanup import cleanup_imported_data, cleanup_snapshots, factory_reset
 from server.route_helpers import cookie_kwargs
 from server.settings import SESSION_COOKIE
 from server.mappers import PRESETS, preset_by_id, validate_mapper
@@ -100,6 +100,15 @@ def rebuild_uk(type_name: str, user=Depends(require_user)):
 def cleanup_data(body: CleanupBody | None = None, user=Depends(require_user)):
     assert_perm(user, "settings.advanced")
     return cleanup_imported_data(get_store(), body.types if body else None)
+
+
+@router.post("/api/data/cleanup-snapshots")
+def api_cleanup_snapshots(user=Depends(require_user)):
+    assert_perm(user, "settings.advanced")
+    store = get_store()
+    if store.active_run() or store.active_export():
+        raise HTTPException(409, "A report is still running. Wait for it to finish, then clear snapshots.")
+    return cleanup_snapshots(store)
 
 
 @router.post("/api/data/factory-reset")

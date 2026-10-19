@@ -72,6 +72,37 @@ function DemoCard({ user, runs, onOpened }) {
   );
 }
 
+function runStillWorking(row) {
+  if (!row) return false;
+  if (row.status === "queued" || row.status === "running") return true;
+  return row.worklist_status === "queued" || row.worklist_status === "running";
+}
+
+function taskCount(count, verb) {
+  const n = Number(count) || 0;
+  return n + " task" + (n === 1 ? "" : "s") + " " + verb;
+}
+
+function WorkReadyNotice({ notice, onClose }) {
+  if (!notice) return null;
+  const failed = notice.status === "failed";
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" role="dialog" aria-modal="true" aria-labelledby="work-ready-title" onClick={(e) => e.stopPropagation()}>
+        <h3 id="work-ready-title">{failed ? "Today's work could not be prepared" : "Today's work is ready"}</h3>
+        {failed ? (
+          <p>{notice.message || "The daily task update failed."}</p>
+        ) : (
+          <p>{taskCount(notice.created, "created")}. {taskCount(notice.updated, "updated")}.</p>
+        )}
+        <div className="modal-actions">
+          <button type="button" onClick={onClose}>Close</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function createProgressLabel(run) {
   const progress = run?.generate_progress;
   const steps = progress?.steps || [];
@@ -132,6 +163,7 @@ export default function App() {
   const [run, setRun] = useState(null);
   const [runId, setRunId] = useState("");
   const [runs, setRuns] = useState([]);
+  const [workNotice, setWorkNotice] = useState(null);
 
   useEffect(() => {
     api.me().then((u) => {
@@ -177,7 +209,7 @@ export default function App() {
     const rows = (d.runs || []).filter((r) => r.status === "succeeded" || r.status === "queued" || r.status === "running");
     setRuns(d.runs || []);
     const succeeded = (d.runs || []).filter((r) => r.status === "succeeded");
-    const active = (d.runs || []).find((r) => r.status === "queued" || r.status === "running");
+    const active = (d.runs || []).find((r) => runStillWorking(r));
     const pickId = preferId || active?.id || succeeded[0]?.id || (d.runs || [])[0]?.id;
     if (!pickId) {
       setRun(null);
@@ -190,7 +222,7 @@ export default function App() {
       if (prev && String(prev.id) === String(pickId) && prev.snapshot) return prev;
       return { ...(prev && String(prev.id) === String(pickId) ? prev : {}), ...(pick || { id: pickId }) };
     });
-    if (pick && (pick.status === "queued" || pick.status === "running")) setRunId(pick.id);
+    if (pick && runStillWorking(pick)) setRunId(pick.id);
     if (!pick || pick.status !== "succeeded") {
       const full = await api.getRun(pickId, { snapshot: false });
       setRun((prev) => {
@@ -198,7 +230,7 @@ export default function App() {
         if (!preferId && active && prev.id && String(prev.id) !== String(full.id)) return prev;
         return full;
       });
-      if (full.status === "queued" || full.status === "running") setRunId(full.id);
+      if (runStillWorking(full)) setRunId(full.id);
       return;
     }
     api.getRun(pickId, { snapshot: false }).then((full) => {
@@ -239,9 +271,17 @@ export default function App() {
         if (cancelled) return;
         failures = 0;
         setRun(doc);
-        if (doc.status === "queued" || doc.status === "running") {
+        if (runStillWorking(doc)) {
           timer = setTimeout(poll, 1000);
         } else {
+          if (doc.worklist_status === "succeeded" || doc.worklist_status === "failed") {
+            setWorkNotice({
+              status: doc.worklist_status,
+              created: doc.worklist_created || 0,
+              updated: doc.worklist_updated || 0,
+              message: doc.worklist_message || "",
+            });
+          }
           setRunId("");
           loadRuns(doc.id).catch(() => {});
         }
@@ -327,7 +367,7 @@ export default function App() {
     if (summary) setRun(summary);
     const full = await api.getRun(id, { snapshot: false });
     setRun((prev) => (prev && String(prev.id) !== String(full.id) ? prev : full));
-    setRunId(full.status === "queued" || full.status === "running" ? full.id : "");
+    setRunId(runStillWorking(full) ? full.id : "");
   }
 
   async function logout() {
@@ -345,6 +385,7 @@ export default function App() {
 
   return (
     <div className="shell">
+      <WorkReadyNotice notice={workNotice} onClose={() => setWorkNotice(null)} />
       <aside className="sidebar">
         <button type="button" className="brand" onClick={() => go("overview", "dashboard")}><span>Vay Reports</span></button>
         {nav.map((group) => (
@@ -490,6 +531,7 @@ export default function App() {
               storageKey={"nav:" + item.id}
               user={user}
               onFactoryReset={() => { setRun(null); setRuns([]); }}
+              onSnapshotsCleared={() => { setRun(null); setRuns([]); loadRuns().catch(() => {}); }}
             />
           ) : null}
         </main>

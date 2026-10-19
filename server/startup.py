@@ -87,6 +87,16 @@ def _resume_orphaned_jobs(store) -> dict:
             if _claim_run(store, doc, rid, my, now):
                 run_ids.append(rid)
             continue
+        if (
+            status == "succeeded"
+            and doc.get("worklist_status") in ("queued", "running")
+            and not (doc.get("owner_pid") and pid_alive(doc.get("owner_pid")))
+        ):
+            store.update_run(rid, {
+                "worklist_status": "failed",
+                "worklist_message": "Today's work stopped before it finished.",
+                "worklist_skipped": False,
+            })
         if doc.get("pdf_export_status") in ("queued", "running") and _claim_export(store, doc, rid, my, now):
             export_ids.append(rid)
 

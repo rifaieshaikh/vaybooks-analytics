@@ -291,6 +291,12 @@ class MemoryStore:
             if key[1] != rid
         }
 
+    def count_view_parts(self):
+        want = current_org_id()
+        if want is None:
+            return len(self.view_parts)
+        return sum(1 for key in self.view_parts if key[0] == want)
+
     def copy_view_parts(self, src_run_id, dest_run_id):
         src = str(src_run_id)
         dest = str(dest_run_id)
@@ -888,6 +894,9 @@ class MongoStore:
     def delete_view_parts(self, run_id):
         self.db.view_parts.delete_many({"run_id": str(run_id)})
 
+    def count_view_parts(self):
+        return self.db.view_parts.count_documents(org_filter())
+
     def copy_view_parts(self, src_run_id, dest_run_id):
         rows = list(self.db.view_parts.find(org_filter({"run_id": str(src_run_id)})))
         docs = []
@@ -982,7 +991,7 @@ class MongoStore:
         return doc
 
     def list_runs(self):
-        return list(self.db.runs.find(org_filter(), {"dashboard": 0}).sort("created_at", -1))
+        return list(self.db.runs.find(org_filter(), {"dashboard": 0, "review_cache": 0}).sort("created_at", -1))
 
     def update_run(self, rid, fields):
         doc = self.peek_run(rid)

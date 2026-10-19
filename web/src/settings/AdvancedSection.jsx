@@ -2,7 +2,7 @@ import { useState } from "react";
 import { api } from "../api";
 import { REQUIRED_FIELDS } from "../theme";
 
-export default function AdvancedSection({ onFactoryReset }) {
+export default function AdvancedSection({ onFactoryReset, onSnapshotsCleared }) {
   const [type, setType] = useState("sales");
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
@@ -54,6 +54,11 @@ export default function AdvancedSection({ onFactoryReset }) {
     setConfirm({ kind: "factory" });
   }
 
+  function openSnapshots() {
+    setErr("");
+    setConfirm({ kind: "snapshots" });
+  }
+
   async function runCleanup(selected) {
     setBusy(true);
     setMsg("");
@@ -63,6 +68,30 @@ export default function AdvancedSection({ onFactoryReset }) {
       const bits = Object.entries(out.removed || {}).map(([name, n]) => `${n} ${name.toLowerCase()}`);
       setMsg(`Removed ${out.total || 0} rows` + (bits.length ? ": " + bits.join(", ") : ".") + (out.balances_cleared ? `. Cleared ${out.balances_cleared} party/customer balances.` : "."));
       setConfirm(null);
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runSnapshots() {
+    setBusy(true);
+    setMsg("");
+    setErr("");
+    try {
+      const out = await api.cleanupSnapshots();
+      const runs = out.runs_deleted || 0;
+      const parts = out.snapshots_deleted || 0;
+      const reports = runs === 1 ? "1 saved report" : `${runs} saved reports`;
+      const documents = parts === 1 ? "1 snapshot document" : `${parts} snapshot documents`;
+      setMsg(
+        runs || parts
+          ? `Removed ${reports} and ${documents} from the database.`
+          : "No report snapshots were stored."
+      );
+      setConfirm(null);
+      if (onSnapshotsCleared) onSnapshotsCleared();
     } catch (e) {
       setErr(e.message);
     } finally {
@@ -107,6 +136,11 @@ export default function AdvancedSection({ onFactoryReset }) {
         <button className="danger" disabled={busy} onClick={openCleanup}>{busy && confirm?.kind === "cleanup" ? "Removing…" : "Remove this data"}</button>
       </div>
       <div className="card">
+        <h2>Clear report snapshots</h2>
+        <p className="muted">Removes every saved report and its 360 snapshot from the database. Imported rows, parties, customers, stock, column maps, and settings stay. Create a report again when you need the numbers.</p>
+        <button className="danger" disabled={busy} onClick={openSnapshots}>{busy && confirm?.kind === "snapshots" ? "Removing…" : "Clear snapshots"}</button>
+      </div>
+      <div className="card">
         <h2>Factory data reset</h2>
         <p className="muted">Removes imported files, stored rows, column maps, settings, and report runs so the app matches a first-time install. You are signed out. User accounts stay.</p>
         <button className="danger" disabled={busy} onClick={openFactory}>{busy && confirm?.kind === "factory" ? "Resetting…" : "Factory data reset"}</button>
@@ -137,6 +171,26 @@ export default function AdvancedSection({ onFactoryReset }) {
               <button type="button" className="ghost" disabled={busy} onClick={() => setConfirm(null)}>Cancel</button>
               <button type="button" className="danger" disabled={busy} onClick={() => runCleanup(confirm.selected)}>
                 {busy ? "Removing…" : "Remove data"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {confirm?.kind === "snapshots" ? (
+        <div className="modal-backdrop" onClick={() => { if (!busy) setConfirm(null); }}>
+          <div className="modal confirm-modal" onClick={(e) => e.stopPropagation()}>
+            <h3>Clear report snapshots?</h3>
+            <p className="muted">Saved reports and 360 snapshots will be deleted from the database. This cannot be undone.</p>
+            <ul className="confirm-list">
+              <li>Every generated report run, workbook, and 360 snapshot</li>
+            </ul>
+            <p className="muted">Kept: imported data, parties, customers, column maps, and settings.</p>
+            {err ? <p className="err">{err}</p> : null}
+            <div className="modal-actions">
+              <button type="button" className="ghost" disabled={busy} onClick={() => setConfirm(null)}>Cancel</button>
+              <button type="button" className="danger" disabled={busy} onClick={runSnapshots}>
+                {busy ? "Removing…" : "Clear snapshots"}
               </button>
             </div>
           </div>

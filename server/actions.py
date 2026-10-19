@@ -516,13 +516,21 @@ def _sales_after_contact(store, contacts):
     return found[:20]
 
 
-def build_results(store, actions, scope, report_date, run, opens):
+def build_results(store, actions, scope, report_date, run, opens, prepared=None):
     """Derived review summary. It does not claim an action caused a payment or a sale."""
-    reps = _rep_map(store)
+    prepared = prepared or {}
+    reps = prepared.get("reps")
+    if reps is None:
+        reps = _rep_map(store)
     scoped = _scoped_actions(actions, scope, reps)
     from server.org_policy import get_org_policy
-    as_of = today_ist(get_org_policy(store).get("timezone")).strftime("%Y-%m-%d")
-    _today, contacts, promises, _disputes = _bundle(store, as_of)
+    if prepared.get("as_of") and "contacts" in prepared and "promises" in prepared:
+        as_of = prepared.get("as_of")
+        contacts = prepared.get("contacts") or []
+        promises = prepared.get("promises") or []
+    else:
+        as_of = today_ist(get_org_policy(store).get("timezone")).strftime("%Y-%m-%d")
+        _today, contacts, promises, _disputes = _bundle(store, as_of)
     open_rows = [row for row in scoped if row.get("status") == "open"]
     overdue = [row for row in open_rows if row.get("due_date") and row["due_date"] < as_of]
     promise_counts = {
@@ -540,8 +548,9 @@ def build_results(store, actions, scope, report_date, run, opens):
             promise_counts[status] += 1
     from server.collection import TARGET_TYPE, _rows, current_target
     from vay.recovery import owner_outcomes
+    stored_targets = prepared.get("targets") if "targets" in prepared else _rows(store, TARGET_TYPE)
     visible_targets = [
-        row for row in _rows(store, TARGET_TYPE)
+        row for row in stored_targets or []
         if _customer_in_scope(scope, reps, row.get("customer_name"))
         and (current_target(row, as_of) or str(row.get("status") or "") == "superseded")
     ]
@@ -575,7 +584,7 @@ def build_results(store, actions, scope, report_date, run, opens):
             }
             for row in owner_outcomes(visible_targets)
         ],
-        "recovery": _sales_after_contact(store, contacts),
+        "recovery": prepared.get("recovery") if "recovery" in prepared else _sales_after_contact(store, contacts),
         "attribution": "Allocated receipts are counted on one task. Received since assigned is observed, not proof that the task caused the payment.",
     }
 

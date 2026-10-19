@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import SectionTabs, { rememberedTab } from "./SectionTabs";
 import { api } from "./api";
 import { CHART, can } from "./theme";
-import { ageLabel, bandKey, bucketMoney, columnsFor, hashBack, hashGet, hashReturnLabel, hashSet, initials, money, rowBucket } from "./format";
+import { ageLabel, bandKey, bucketMoney, columnsFor, dueDateLabel, hashBack, hashGet, hashReturnLabel, hashSet, initials, money, rowBucket } from "./format";
 import AgeBar, { ageParts } from "./AgeBar";
 import { EmptyCard, FilterBar, GROUP_FIELDS, groupSortOptions, ListPager, MemberCustomersTable, SortTh, toggleSort } from "./FilterBar";
 import SettlementsPanel from "./SettlementsPanel";
@@ -374,7 +374,7 @@ function Profile({ detail, runId, canSales, canStock, canEditDueDays, onBack, ba
                   <tbody>
                     {dueInvoices.map((line, i) => (
                       <tr key={i} className={line.kind === "opening" ? "total" : ""}>
-                        <td>{line.date_label}</td>
+                        <td>{dueDateLabel(line)}</td>
                         <td>
                           {line.customer_uk ? (
                             <button type="button" className="linkish" onClick={() => hashSet("customer/" + encodeURIComponent(line.customer_uk))}>{line.party}</button>

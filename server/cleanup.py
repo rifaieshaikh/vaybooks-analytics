@@ -98,6 +98,20 @@ def delete_all_runs(store):
     return deleted
 
 
+def cleanup_snapshots(store):
+    """Drop saved report runs and the 360 snapshot documents stored with them.
+
+    Imported rows, uploads, column maps, and settings stay.
+    """
+    snapshots_deleted = store.count_view_parts()
+    runs_deleted = delete_all_runs(store)
+    store.delete_all_view_parts()
+    return {
+        "runs_deleted": runs_deleted,
+        "snapshots_deleted": snapshots_deleted,
+    }
+
+
 def factory_reset(store):
     """Drop stored business data so the organization matches a first-time install."""
     removed = {}

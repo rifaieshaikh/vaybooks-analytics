@@ -124,6 +124,8 @@ def test_saved_sales_explanation_keeps_its_basis_after_a_later_upload():
     promise = follow.json()["promises"][0]
     assert promise["receipt_coverage_through"] == "2026-10-07"
     assert promise["data_basis"]["basis"] == "live"
+    prepared = c.post("/api/worklist/refresh")
+    assert prepared.status_code == 200, prepared.text
     today = c.get("/api/worklist")
     assert today.status_code == 200, today.text
     acme = next(row for row in today.json()["rows"] if row["customer"] == "Acme")
@@ -212,6 +214,8 @@ def test_today_mixed_coverage_names_each_date_and_hides_sales_sources():
         "next_follow_up": "2026-09-01",
     })
     assert only.status_code == 200, only.text
+    prepared = c.post("/api/worklist/refresh")
+    assert prepared.status_code == 200, prepared.text
     single = c.get("/api/worklist")
     assert single.status_code == 200, single.text
     card = next(row for row in single.json()["rows"] if row["customer"] == "Only")
@@ -250,6 +254,8 @@ def test_today_mixed_coverage_names_each_date_and_hides_sales_sources():
         "effective_date": "2026-10-03",
         "fields": {"Item Name": "Widget", "Qty": 1, "P.Price": 4, "EffectiveDate": "2026-10-03"},
     })
+    prepared_again = c.post("/api/worklist/refresh")
+    assert prepared_again.status_code == 200, prepared_again.text
     mixed = c.get("/api/worklist")
     assert mixed.status_code == 200, mixed.text
     repeat = next(row for row in mixed.json()["rows"] if row["customer"] == "Repeat" and row["kind"] == "repurchase")

@@ -2444,6 +2444,46 @@ def test_create_keeps_previous_run_and_persists_360():
     assert newer["total"] >= 1
 
 
+def test_cleanup_snapshots_removes_runs_keeps_imported_rows():
+    c = client()
+    _seed_core(c)
+    created = c.post("/api/runs", json={"packs": {"core": True}, "report_date": "2024-09-19"})
+    rid = created.json()["id"]
+    assert c.get("/api/runs/%s" % rid).json()["status"] == "succeeded"
+    store = get_store()
+    assert store.count_view_parts() >= 1
+    customers_before = c.get("/api/rows", params={"type": "customer"}).json()["total"]
+    assert customers_before >= 1
+    store.put_view_part("orphan-run", "meta", "root", "{}")
+    out = c.post("/api/data/cleanup-snapshots")
+    assert out.status_code == 200
+    body = out.json()
+    assert body["runs_deleted"] >= 1
+    assert body["snapshots_deleted"] >= 1
+    assert c.get("/api/runs").json()["runs"] == []
+    assert c.get("/api/runs/%s" % rid).status_code == 404
+    assert store.count_view_parts() == 0
+    assert store.get_view_part("orphan-run", "meta", "root") is None
+    assert c.get("/api/rows", params={"type": "customer"}).json()["total"] == customers_before
+    assert c.get("/api/rows", params={"type": "sales"}).json()["total"] >= 1
+    assert c.get("/api/auth/me").status_code == 200
+    c.post("/api/users", json={"username": "wh", "password": "wh12345", "role": "Warehouse"})
+    other = TestClient(app)
+    login_as(other, "wh", "wh12345")
+    assert other.post("/api/data/cleanup-snapshots").status_code == 403
+    raw = TestClient(app)
+    assert raw.post("/api/data/cleanup-snapshots").status_code == 401
+
+
+def test_cleanup_snapshots_refuses_while_a_report_is_running():
+    c = client()
+    get_store().insert_run({"status": "running", "report_date": "2024-09-19"})
+    out = c.post("/api/data/cleanup-snapshots")
+    assert out.status_code == 409
+    assert "still running" in out.json()["detail"]
+    assert c.get("/api/runs").json()["runs"]
+
+
 def test_cleanup_keeps_runs_factory_deletes_runs():
     c = client()
     _seed_core(c)

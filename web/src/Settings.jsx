@@ -13,8 +13,8 @@ import SettlementSection from "./settings/SettlementSection";
 import UsersSection from "./settings/UsersSection";
 import SectionTabs from "./SectionTabs";
 
-export default function SettingsPage({ section, tabs, selected, onSection, storageKey, user, onFactoryReset }) {
-  const body = settingsBody(section, user, onFactoryReset);
+export default function SettingsPage({ section, tabs, selected, onSection, storageKey, user, onFactoryReset, onSnapshotsCleared }) {
+  const body = settingsBody(section, user, onFactoryReset, onSnapshotsCleared);
   return (
     <div className="stack">
       {tabs?.length ? <SectionTabs label="Settings" storageKey={storageKey} tabs={tabs} value={selected || section} onChange={onSection} /> : null}
@@ -23,7 +23,7 @@ export default function SettingsPage({ section, tabs, selected, onSection, stora
   );
 }
 
-function settingsBody(section, user, onFactoryReset) {
+function settingsBody(section, user, onFactoryReset, onSnapshotsCleared) {
   if (section === "network") return <NetworkSection />;
   if (section === "organization") return <OrganizationSection />;
   if (section === "license") return <LicenseSection />;
@@ -42,6 +42,6 @@ function settingsBody(section, user, onFactoryReset) {
   if (section === "order-check") return <OrderCheckDefaultsSection />;
   if (section === "party-types") return <PartyTypesSection />;
   if (section === "audit") return <AuditSection />;
-  if (section === "advanced") return <AdvancedSection onFactoryReset={onFactoryReset} />;
+  if (section === "advanced") return <AdvancedSection onFactoryReset={onFactoryReset} onSnapshotsCleared={onSnapshotsCleared} />;
   return <p className="muted">That page is not available for this account.</p>;
 }

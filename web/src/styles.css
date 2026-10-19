@@ -2910,6 +2910,16 @@ button.settlement-option.on .settlement-step {
   border-radius: 16px;
 }
 .analytics-item p { margin: 0; }
+.work-group { align-items: stretch; flex-direction: column; }
+.work-line {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  padding-top: 12px;
+  border-top: 1px solid #eceae8;
+}
+.work-line:first-of-type { border-top: 0; padding-top: 4px; }
 .analytics-kicker {
   font-size: 11px;
   letter-spacing: 0.06em;

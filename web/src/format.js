@@ -29,6 +29,16 @@ export function moneyOrDash(n) {
   return money(n);
 }
 
+const DAY_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+export function dueDateLabel(line) {
+  const ready = String((line && line.date_label) || "").trim();
+  if (ready) return ready;
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(String((line && line.date) || ""));
+  if (!match) return "—";
+  return match[3] + " " + DAY_MONTHS[Number(match[2]) - 1] + " " + match[1];
+}
+
 /** Outstanding / sales age band keys (default 6 bands). */
 export const AGE_KEYS = ["d0_15", "d15_30", "d30_45", "d45_60", "d60_90", "d90"];
 

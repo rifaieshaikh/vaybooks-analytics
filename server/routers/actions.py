@@ -12,9 +12,7 @@ from server.actions import (
     listed_review_opens,
     record_review_open,
     set_status,
-    suggestions,
     _scoped_actions,
-    _rep_map,
 )
 from server.auth import assert_perm, require_user
 from server.collection import (
@@ -47,7 +45,7 @@ from server.schemas import (
 )
 from server.store import get_store
 from server.weekly import ensure_weekly_run_once
-from server.worklist import build_worklist, customer_in_scope, resolve_scope
+from server.worklist import customer_in_scope, resolve_scope
 
 router = APIRouter()
 
@@ -123,17 +121,44 @@ def api_worklist(request: Request, user=Depends(require_user)):
         raise HTTPException(403, "Forbidden") from exc
     except ValueError as exc:
         raise HTTPException(404, str(exc)) from exc
-    runs = [row for row in (store.list_runs() or []) if row.get("status") == "succeeded"]
-    report_date = str((runs[0].get("report_date") if runs else "") or "")[:10]
-    from server.explain import annotate_today
-    payload = build_worklist(
+    from server.work_tasks import load_worklist
+    return load_worklist(
         store,
         scope,
-        report_date,
         kind=request.query_params.get("kind") or "",
         due=request.query_params.get("due") or "",
+        perms=user.get("permissions") or [],
     )
-    return annotate_today(store, payload, user.get("permissions") or [])
+
+
+@router.post("/api/worklist/refresh")
+def api_worklist_refresh(user=Depends(require_user)):
+    if not _can_read(user):
+        raise HTTPException(403, "Forbidden")
+    from server.work_tasks import sync_work_tasks
+    try:
+        result = sync_work_tasks(get_store(), force=True)
+    except Exception as exc:
+        raise HTTPException(500, "Today's work could not be prepared.") from exc
+    return {
+        "status": result.get("status") or "",
+        "created": int(result.get("created") or 0),
+        "updated": int(result.get("updated") or 0),
+        "skipped": bool(result.get("skipped")),
+        "synced_on": result.get("synced_on") or "",
+        "message": result.get("message") or "",
+    }
+
+
+@router.post("/api/worklist/{task_id}/status")
+def api_work_task_status(task_id: str, body: ActionStatusBody, user=Depends(require_user)):
+    assert_perm(user, "actions.manage")
+    from server.work_tasks import set_work_task_status
+    try:
+        return set_work_task_status(get_store(), task_id, body.status)
+    except ValueError as exc:
+        message = str(exc)
+        raise HTTPException(404 if message == "Task not found" else 400, message) from exc
 
 
 @router.get("/api/actions")
@@ -307,7 +332,7 @@ def api_clear_allocation(allocation_id: str, user=Depends(require_user)):
         _collection_error(exc)
 
 
-def _review_payload(store, user, run_id, staff, record_open):
+def _review_payload(store, user, run_id, staff, record_open, refresh=False):
     ensure_weekly_run_once(store)
     run = _run(store, run_id)
     try:
@@ -316,13 +341,14 @@ def _review_payload(store, user, run_id, staff, record_open):
         raise HTTPException(403, "Forbidden") from exc
     except ValueError as exc:
         raise HTTPException(404, str(exc)) from exc
-    bundle = _bundle(store, run)
-    policy = get_org_policy(store)
-    ideas = suggestions(bundle, policy.get("thresholds") or {})
+    from server.review_cache import ensure_review_suggestions, review_material
+
+    ideas, quality_messages = ensure_review_suggestions(store, run)
     report_date = str(run.get("report_date") or "")[:10]
-    actions = _with_outcomes(store, report_date, bundle)
+    run = _run(store, str(run.get("_id") or run.get("id") or run_id))
+    material = review_material(store, run, report_date, quality_messages, force=refresh)
+    actions = material.get("actions") or []
     week = [row for row in actions if str(row.get("report_date") or "")[:10] == report_date or not row.get("report_date")]
-    week = _scoped_actions(week, scope, _rep_map(store))
     if record_open:
         opens = record_review_open(store, user.get("username") or "", report_date)
     else:
@@ -330,8 +356,8 @@ def _review_payload(store, user, run_id, staff, record_open):
     return {
         "report_date": report_date,
         "suggestions": ideas,
-        "actions": week,
-        "results": build_results(store, week, scope, report_date, run, opens),
+        "actions": _scoped_actions(week, scope, material.get("reps") or {}),
+        "results": build_results(store, week, scope, report_date, run, opens, prepared=material),
         "owners": _owners(store),
         "default_due": default_due(report_date),
         "can_manage": "actions.manage" in (user.get("permissions") or []),
@@ -348,6 +374,7 @@ def api_review(request: Request, user=Depends(require_user)):
         request.query_params.get("run") or "",
         request.query_params.get("staff") or "",
         True,
+        refresh=(request.query_params.get("refresh") or "") in ("1", "true", "yes"),
     )
 
 

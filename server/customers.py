@@ -691,6 +691,16 @@ def _fmt_day(d):
     return d.strftime("%d %b %Y")
 
 
+def _line_date(line):
+    label = str((line or {}).get("date_label") or "").strip()
+    if label:
+        return label
+    day = parse_date((line or {}).get("date"))
+    if day:
+        return _fmt_day(day)
+    return str((line or {}).get("date") or "")
+
+
 def _iso(d):
     if not d:
         return ""
@@ -3257,7 +3267,7 @@ def _customer_statement_pdf(pdf, family, detail):
             pdf, family,
             ["Date", "Invoice", "What", "Still due", "Age"],
             [[
-                x.get("date_label") or "",
+                _line_date(x),
                 (x.get("invoice") or "—")[:16],
                 x.get("what") or "",
                 money(x.get("due")),
@@ -3466,7 +3476,7 @@ def _rep_brief_pdf(pdf, family, detail, *, title="Vay  ·  Sales brief"):
                 pdf, family,
                 ["Date", "Customer", "Invoice", "Still due", "Age"],
                 [[
-                    x.get("date_label") or "",
+                    _line_date(x),
                     (x.get("party") or "—")[:18],
                     (x.get("invoice") or "—")[:14],
                     money(x.get("due")),
@@ -3479,7 +3489,7 @@ def _rep_brief_pdf(pdf, family, detail, *, title="Vay  ·  Sales brief"):
                 pdf, family,
                 ["Date", "Invoice", "What", "Still due", "Age"],
                 [[
-                    x.get("date_label") or "",
+                    _line_date(x),
                     (x.get("invoice") or "—")[:16],
                     x.get("what") or "",
                     money(x.get("due")),

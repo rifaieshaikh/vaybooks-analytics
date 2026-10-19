@@ -487,6 +487,8 @@ def _run_job(store, run_id):
                 )
                 quality = phase2.setdefault("quality", {})
                 quality["rows"] = list(quality.get("rows") or []) + quality_rows(opening_assessment)
+                from server.review_cache import save_review_suggestions
+                save_review_suggestions(store, run_id, phase2)
                 sheets = excel_reports(phase2)
                 wanted_ids = {row[0] for row in phase2_wanted}
                 if chosen or report_perms is not None:
@@ -657,7 +659,7 @@ def _run_job(store, run_id):
                 except Exception:
                     dashboard_doc["explanations"] = {}
                     dashboard_doc["explanations_message"] = "Number explanations could not be saved with this report."
-            store.update_run(run_id, {
+            saved = {
                 "status": "succeeded" if usable else "failed",
                 "finished_at": now_utc(),
                 "message": "" if usable and not failed_steps else (summary or "Could not create reports."),
@@ -679,8 +681,21 @@ def _run_job(store, run_id):
                     "fraction": 0,
                     "steps": steps,
                 },
-            })
+            }
+            if usable:
+                saved["worklist_status"] = "queued"
+                saved["worklist_created"] = 0
+                saved["worklist_updated"] = 0
+                saved["worklist_message"] = ""
+                saved["worklist_skipped"] = False
+            store.update_run(run_id, saved)
             invalidate_views_cache()
+            if usable:
+                try:
+                    from server.work_tasks import sync_after_report
+                    sync_after_report(store, run_id, dt.strftime("%Y-%m-%d"))
+                except Exception:
+                    log.exception("today's work sync failed")
         except Cancelled:
             store.update_run(run_id, {"status": "cancelled", "message": "Cancelled"})
         except Exception as exc:

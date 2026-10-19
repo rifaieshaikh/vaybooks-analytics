@@ -369,6 +369,10 @@ def annotate_today(store, payload, perms):
             ("Sales", sales_date, "sales"),
             ("Stock", stock_date if use_stock else "", "stock"),
         ]
+        row["coverage_parts"] = [
+            {"label": label, "date": day or "", "type": type_name}
+            for label, day, type_name in parts
+        ]
         visible = [part for part in parts if part[1] and can_see_source(perms, part[2])]
         mixed, note = mixed_coverage(visible)
         types = []

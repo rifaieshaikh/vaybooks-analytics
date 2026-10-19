@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { api } from "./api";
 import ReminderDraft from "./ReminderDraft";
-import { money } from "./format";
+import { dueDateLabel, money } from "./format";
 
 const ENTRY_TYPES = [
   ["contact", "Contact"],
@@ -70,7 +70,8 @@ function invoiceChoices(lines) {
     const key = invoice.toLowerCase();
     if (!invoice || seen.has(key) || !(Number(due) > 0)) return;
     seen.add(key);
-    out.push({ invoice, due });
+    const date = dueDateLabel(line);
+    out.push({ invoice, due, date: date === "—" ? "" : date });
   });
   return out;
 }
@@ -128,6 +129,7 @@ function InvoiceField({ lines, selected, other, onToggle, onOther }) {
           <label className="follow-invoice" key={line.invoice}>
             <input type="checkbox" checked={selected.includes(line.invoice)} onChange={() => onToggle(line.invoice)} />
             <span>{line.invoice}</span>
+            {line.date ? <span className="muted">{line.date}</span> : null}
             <span className="muted">{money(line.due)}</span>
           </label>
         ))}

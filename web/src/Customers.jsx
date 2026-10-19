@@ -5,7 +5,7 @@ import CollectionFollowUp from "./CollectionFollowUp";
 import ReminderDraft from "./ReminderDraft";
 import ExplainFigure from "./ExplainFigure";
 import { CHART, can } from "./theme";
-import { ageLabel, bandKey, bucketMoney, columnsFor, hashBack, hashGet, hashReturnLabel, hashSet, initials, money, moneyOrDash, round2, rowBucket } from "./format";
+import { ageLabel, bandKey, bucketMoney, columnsFor, dueDateLabel, hashBack, hashGet, hashReturnLabel, hashSet, initials, money, moneyOrDash, round2, rowBucket } from "./format";
 import AgeBar, { ageParts } from "./AgeBar";
 import { CUSTOMER_FIELDS, customerSortOptions, EmptyCard, FilterBar, ListPager, SortTh, toggleSort } from "./FilterBar";
 import SettlementsPanel from "./SettlementsPanel";
@@ -211,7 +211,7 @@ function DueTable({ rows, canSales, onOpenInvoice }) {
         <tbody>
           {ordered.map((line, i) => (
             <tr key={i} className={line.kind === "opening" ? "total" : ""}>
-              <td>{line.date_label}</td>
+              <td>{dueDateLabel(line)}</td>
               <td>
                 {line.kind === "opening" ? "—" : (
                   <InvoiceLink id={line.invoice_id} label={line.invoice || "Sale"} enabled={canSales} onOpen={onOpenInvoice} />

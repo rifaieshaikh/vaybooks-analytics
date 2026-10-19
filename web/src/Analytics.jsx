@@ -628,6 +628,32 @@ const WORK_KIND = {
   stock: "Stock",
 };
 
+function groupWorkRows(rows) {
+  const groups = [];
+  const index = new Map();
+  (rows || []).forEach((row) => {
+    const stock = row.kind === "stock";
+    const key = stock ? "\0stock" : (row.customer || "Unknown");
+    let slot = index.get(key);
+    if (slot == null) {
+      slot = groups.length;
+      index.set(key, slot);
+      groups.push({
+        key,
+        title: stock ? "Stock" : (row.customer || "Unknown"),
+        rows: [],
+      });
+    }
+    groups[slot].rows.push(row);
+  });
+  return groups;
+}
+
+function taskCount(count, verb) {
+  const n = Number(count) || 0;
+  return n + " task" + (n === 1 ? "" : "s") + " " + verb;
+}
+
 function TodayPage({ user }) {
   const [data, setData] = useState(null);
   const [err, setErr] = useState("");
@@ -636,6 +662,8 @@ function TodayPage({ user }) {
   const [due, setDue] = useState("");
   const [open, setOpen] = useState(null);
   const [assign, setAssign] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [notice, setNotice] = useState(null);
   const manage = can(user, "actions.manage");
 
   function load(next) {
@@ -650,19 +678,48 @@ function TodayPage({ user }) {
   async function mark(row, status) {
     setErr("");
     try {
-      await api.setActionStatus(row.action_id, status);
+      if (row.id) await api.setWorkTaskStatus(row.id, status);
+      if (row.action_id) await api.setActionStatus(row.action_id, status);
       load();
     } catch (e) {
       setErr(e.message || "Could not update the action");
     }
   }
 
+  async function refresh() {
+    setRefreshing(true);
+    setErr("");
+    try {
+      const result = await api.refreshWorklist();
+      setNotice({
+        status: result.status || "succeeded",
+        created: result.created || 0,
+        updated: result.updated || 0,
+        message: result.message || "",
+      });
+      load();
+    } catch (e) {
+      setErr(e.message || "Could not refresh today's work");
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
   if (err && !data) return <p className="err">{err}</p>;
   if (!data) return <p className="muted">Loading…</p>;
   const rows = data.rows || [];
+  const groups = groupWorkRows(rows);
   return (
     <div>
-      <p className="muted">{data.order_rule}</p>
+      <p className="muted">
+        {data.order_rule}
+        {data.synced_on ? " · Prepared " + data.synced_on : ""}
+      </p>
+      <div className="row gap">
+        <button type="button" className="secondary" disabled={refreshing} onClick={refresh}>
+          {refreshing ? "Refreshing…" : "Refresh"}
+        </button>
+      </div>
       {data.can_pick_staff ? (
         <label>
           Staff
@@ -705,55 +762,77 @@ function TodayPage({ user }) {
       ) : null}
       {data.message && rows.length ? <p className="warn">{data.message}</p> : null}
       {err ? <p className="err">{err}</p> : null}
-      {rows.length ? rows.map((row) => (
-        <article className="analytics-item" key={row.id || row.kind + ":" + row.customer}>
-          <div>
-            <p className="analytics-title">{row.kind === "stock" ? (row.products?.[0] || row.customer) : row.customer}</p>
-            <div className="analytics-meta">
-              <span>{WORK_KIND[row.kind] || row.kind}</span>
-              {row.owner ? <span>{row.owner}</span> : null}
-              {row.due_date ? <span>Due {row.due_date}</span> : null}
-              {row.salesperson ? <span>{row.salesperson}</span> : null}
-              <span>{row.age} days</span>
-              {row.products?.length ? <span>{row.products.join(", ")}</span> : null}
-              <span>Balance {money(row.credit?.balance)}</span>
-              <span>Overdue {money(row.credit?.overdue)}</span>
-              {row.value_kind && row.amount != null ? (
-                <span>{row.value_kind === "estimated" ? "Estimated" : "Observed"} {money(row.amount)}</span>
-              ) : null}
-              {row.data_date ? <span>Data {row.data_date}</span> : null}
-              {row.basis?.coverage_through ? <span>Coverage {row.basis.coverage_through}</span> : null}
+      {groups.length ? groups.map((group) => (
+        <article className="analytics-item work-group" key={group.key}>
+          <p className="analytics-title">{group.title}</p>
+          {group.rows.map((row) => (
+            <div className="work-line" key={row.id || row.kind + ":" + row.customer}>
+              <div>
+                <div className="analytics-meta">
+                  <span>{WORK_KIND[row.kind] || row.kind}</span>
+                  {row.kind === "stock" ? <span>{row.products?.[0] || row.customer}</span> : null}
+                  {row.owner ? <span>{row.owner}</span> : null}
+                  {row.due_date ? <span>Due {row.due_date}</span> : null}
+                  {row.salesperson ? <span>{row.salesperson}</span> : null}
+                  <span>{row.age} days</span>
+                  {row.products?.length && row.kind !== "stock" ? <span>{row.products.join(", ")}</span> : null}
+                  <span>Balance {money(row.credit?.balance)}</span>
+                  <span>Overdue {money(row.credit?.overdue)}</span>
+                  {row.value_kind && row.amount != null ? (
+                    <span>{row.value_kind === "estimated" ? "Estimated" : "Observed"} {money(row.amount)}</span>
+                  ) : null}
+                  {row.data_date ? <span>Data {row.data_date}</span> : null}
+                  {row.basis?.coverage_through ? <span>Coverage {row.basis.coverage_through}</span> : null}
+                  {row.last_seen && data.synced_on && row.last_seen < data.synced_on ? <span>Last seen {row.last_seen}</span> : null}
+                </div>
+                <p className="muted">{row.reason}</p>
+                {row.basis?.basis === "live" ? <p className="muted">Latest data</p> : null}
+                {row.basis?.mixed_coverage && row.basis.coverage_note ? <p className="warn">{row.basis.coverage_note}</p> : null}
+                {row.blocked ? <p className="warn">{row.next_step}</p> : (row.next_step ? <p className="muted">{row.next_step}</p> : null)}
+                {row.explanation ? <ExplainFigure explanation={row.explanation} label="Explain" /> : null}
+              </div>
+              <div className="row gap">
+                <button type="button" className="secondary" onClick={() => setOpen(row)}>Open</button>
+                {manage ? (
+                  <button type="button" className="secondary" onClick={() => setAssign({
+                    action_type: row.kind === "stock" ? "purchase" : (row.kind === "inactive" || row.kind === "repurchase" ? "recovery" : "collection"),
+                    subject_kind: row.kind === "stock" ? "item" : "customer",
+                    subject_name: row.kind === "stock" ? (row.products?.[0] || row.customer) : row.customer,
+                    proposal: row.next_step || row.reason || "Follow up",
+                    due_date: row.due_date || "",
+                    amount: row.amount,
+                  })}>Assign</button>
+                ) : null}
+                {row.evidence?.name ? (
+                  <button type="button" className="secondary" onClick={() => drill({ drill: row.evidence })}>Evidence</button>
+                ) : null}
+                {manage && row.id ? (
+                  <>
+                    <button type="button" onClick={() => mark(row, "done")}>Done</button>
+                    <button type="button" className="secondary" onClick={() => mark(row, "dropped")}>Drop</button>
+                  </>
+                ) : null}
+              </div>
             </div>
-            <p className="muted">{row.reason}</p>
-            {row.basis?.basis === "live" ? <p className="muted">Latest data</p> : null}
-            {row.basis?.mixed_coverage && row.basis.coverage_note ? <p className="warn">{row.basis.coverage_note}</p> : null}
-            {row.blocked ? <p className="warn">{row.next_step}</p> : (row.next_step ? <p className="muted">{row.next_step}</p> : null)}
-            {row.explanation ? <ExplainFigure explanation={row.explanation} label="Explain" /> : null}
-          </div>
-          <div className="row gap">
-            <button type="button" className="secondary" onClick={() => setOpen(row)}>Open</button>
-            {manage ? (
-              <button type="button" className="secondary" onClick={() => setAssign({
-                action_type: row.kind === "stock" ? "purchase" : (row.kind === "inactive" || row.kind === "repurchase" ? "recovery" : "collection"),
-                subject_kind: row.kind === "stock" ? "item" : "customer",
-                subject_name: row.kind === "stock" ? (row.products?.[0] || row.customer) : row.customer,
-                proposal: row.next_step || row.reason || "Follow up",
-                due_date: row.due_date || "",
-                amount: row.amount,
-              })}>Assign</button>
-            ) : null}
-            {row.evidence?.name ? (
-              <button type="button" className="secondary" onClick={() => drill({ drill: row.evidence })}>Evidence</button>
-            ) : null}
-            {manage && row.action_id ? (
-              <>
-                <button type="button" onClick={() => mark(row, "done")}>Done</button>
-                <button type="button" className="secondary" onClick={() => mark(row, "dropped")}>Drop</button>
-              </>
-            ) : null}
-          </div>
+          ))}
         </article>
       )) : <p className="muted">{data.message || "Nothing is due today."}</p>}
+      {notice ? createPortal(
+        <div className="modal-backdrop" onClick={() => setNotice(null)}>
+          <div className="modal" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+            <h3>{notice.status === "failed" ? "Today's work could not be prepared" : "Today's work is ready"}</h3>
+            {notice.status === "failed" ? (
+              <p>{notice.message || "The daily task update failed."}</p>
+            ) : (
+              <p>{taskCount(notice.created, "created")}. {taskCount(notice.updated, "updated")}.</p>
+            )}
+            <div className="modal-actions">
+              <button type="button" onClick={() => setNotice(null)}>Close</button>
+            </div>
+          </div>
+        </div>,
+        document.body,
+      ) : null}
       {open && open.kind !== "stock" ? createPortal(
         <div className="modal-backdrop" onClick={() => { setOpen(null); load(); }}>
           <div className="modal assign-modal follow-modal" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
@@ -804,8 +883,11 @@ function WeeklyReview({ run, user }) {
   const [err, setErr] = useState("");
   const [draft, setDraft] = useState(null);
   const manage = can(user, "actions.manage");
-  function load() {
-    api.review(run?.id ? { run: run.id } : {})
+  function load(refresh) {
+    const params = {};
+    if (run?.id) params.run = run.id;
+    if (refresh) params.refresh = "1";
+    api.review(params)
       .then(setData)
       .catch((e) => setErr(e.message || "Could not load"));
   }
@@ -842,7 +924,10 @@ function WeeklyReview({ run, user }) {
       </section>
       <section>
         <h3>Results</h3>
-        <button type="button" className="secondary" onClick={() => api.downloadReview(run?.id ? { run: run.id } : {}).catch((e) => setErr(e.message || "Could not download"))}>Download Excel</button>
+        <div className="row gap">
+          <button type="button" className="secondary" onClick={() => load(true)}>Refresh</button>
+          <button type="button" className="secondary" onClick={() => api.downloadReview(run?.id ? { run: run.id } : {}).catch((e) => setErr(e.message || "Could not download"))}>Download Excel</button>
+        </div>
         <div className="analytics-meta">
           <span>Open {data.results?.open_count || 0}</span>
           <span>Overdue {data.results?.overdue_count || 0}</span>
