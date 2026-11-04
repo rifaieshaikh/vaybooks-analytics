@@ -1,4 +1,4 @@
-"""Write a simple 256x256 PNG icon for the Windows build."""
+"""Write a 512x512 PNG icon for Windows and macOS installers."""
 
 from __future__ import annotations
 
@@ -6,7 +6,8 @@ import struct
 import zlib
 from pathlib import Path
 
-W = H = 256
+# electron-builder requires at least 512x512 for macOS targets.
+W = H = 512
 BG = (15, 61, 46, 255)
 FG = (31, 107, 74, 255)
 INK = (255, 255, 255, 255)
@@ -29,15 +30,15 @@ def inside_round_rect(x: int, y: int, x0: int, y0: int, x1: int, y1: int, r: int
 
 
 def color(x: int, y: int) -> tuple[int, int, int, int]:
-    if not inside_round_rect(x, y, 8, 8, W - 8, H - 8, 40):
+    if not inside_round_rect(x, y, 16, 16, W - 16, H - 16, 80):
         return (0, 0, 0, 0)
-    if not inside_round_rect(x, y, 28, 28, W - 28, H - 28, 28):
+    if not inside_round_rect(x, y, 56, 56, W - 56, H - 56, 56):
         return BG
     # Chevron V
-    cx, cy = W // 2, 92
-    thickness = 22
-    left = abs((y - cy) - (x - 56)) <= thickness and 70 <= y <= 190 and x <= cx + 8
-    right = abs((y - cy) - (W - 56 - x)) <= thickness and 70 <= y <= 190 and x >= cx - 8
+    cx, cy = W // 2, 184
+    thickness = 44
+    left = abs((y - cy) - (x - 112)) <= thickness and 140 <= y <= 380 and x <= cx + 16
+    right = abs((y - cy) - (W - 112 - x)) <= thickness and 140 <= y <= 380 and x >= cx - 16
     if left or right:
         return INK
     return FG
@@ -54,7 +55,7 @@ def main() -> None:
     out = Path(__file__).resolve().parents[1] / "build" / "icon.png"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_bytes(png)
-    print("wrote", out)
+    print("wrote", out, "%dx%d" % (W, H))
 
 
 if __name__ == "__main__":
